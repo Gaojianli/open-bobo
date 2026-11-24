@@ -2,7 +2,7 @@
 
 Open BOBO 是 FUNF 啵啵贝的蓝牙协议逆向项目，提供协议文档和网页版控制台。用支持 Web Bluetooth 的浏览器打开控制台，就可以通过本机蓝牙连接附近的啵啵贝，无需安装官方 App。
 
-[打开网页版控制台](https://open-bobo.pages.dev/) · [阅读蓝牙协议文档](docs/protocol.md)
+[阅读蓝牙协议文档](docs/protocol.md)
 
 ## 能做什么
 
@@ -13,10 +13,8 @@ Open BOBO 是 FUNF 啵啵贝的蓝牙协议逆向项目，提供协议文档和�
 - **与第三方软件结合**，实现类似 [OpenDGLab](https://github.com/OpenDGLab/OpenDGLab-Core) 的功能。
 
 ## 使用示例
-
-以调节振动为例：
-
-1. 给啵啵贝开机，打开电脑或手机的蓝牙，然后用支持 Web Bluetooth 的浏览器打开[网页版控制台](https://open-bobo.pages.dev/)。
+使用此协议开发了网络版本的[控制台](https://open-bobo.pages.dev/)，以调节振动为例：
+1. 给啵啵贝开机，打开电脑或手机的蓝牙，然后用支持 Web Bluetooth 的浏览器打开。
 2. 点击“连接设备”，在浏览器弹窗中选择自己的啵啵贝。如果页面先显示“识别附近的啵啵贝”，先点击识别，再连接。
 3. 在“振动电机”中选择“模式 1”，把等级调到 25，点击“应用设置”。
 4. 点击“停止此电机”结束振动。使用完毕后，点击“断开连接”。
