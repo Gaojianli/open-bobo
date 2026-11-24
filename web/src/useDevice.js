@@ -138,6 +138,17 @@ export function useDevice(env = globalThis) {
     }
   }
 
+  async function pollStatus() {
+    const s = active
+    if (phase.value !== 'ready' || busy.value || stopping.value || awaitingTimer.value || s.polling) return
+    s.polling = true
+    try {
+      await requestStatus(s)
+    } finally {
+      s.polling = false
+    }
+  }
+
   async function apply(channel, level, mode) {
     const s = active
     if (phase.value !== 'ready' || busy.value || stopping.value || remaining.value > 0 || awaitingTimer.value) return false
@@ -223,5 +234,5 @@ export function useDevice(env = globalThis) {
     clear(s, remaining.value > 0 || awaitingTimer.value ? '已断开连接，设备定时可能仍在继续。' : '已断开连接。')
   }
 
-  return { motorReadings, intensityHistory, hasElectric, awaitingTimer, reportedTimerChannels, startTimer, refresh, available, reason, phase, battery, remaining, message, busy, stopping, debugBluetooth, connect, apply, stop, disconnect }
+  return { motorReadings, intensityHistory, hasElectric, awaitingTimer, reportedTimerChannels, startTimer, refresh, pollStatus, available, reason, phase, battery, remaining, message, busy, stopping, debugBluetooth, connect, apply, stop, disconnect }
 }

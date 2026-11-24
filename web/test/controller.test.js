@@ -185,6 +185,30 @@ test('应用设置和全部停止会重新请求状态，强度以设备通知�
   assert.equal(model.motorReadings.value.suction, 0)
   assert.deepEqual(model.intensityHistory.value.map(sample => sample.suction), [0, 49, 0])
 })
+test('周期查询不会重叠，并与用户控制共用写入队列', async () => {
+  const { model, write } = fixture()
+  await model.connect()
+  const commands = []
+  let release
+  write.writeValueWithResponse = async packet => {
+    commands.push(packet.slice(3))
+    if (commands.length === 1) await new Promise(resolve => { release = resolve })
+  }
+  const polling = model.pollStatus()
+  await Promise.resolve()
+  await model.pollStatus()
+  assert.equal(model.busy.value, false)
+  const applying = model.apply('vibration', 0, 1)
+  await model.pollStatus()
+  assert.deepEqual(commands, [statusRequest()])
+  release()
+  await polling
+  assert.equal(await applying, true)
+  assert.deepEqual(commands, [statusRequest(), motor('vibration', 0, 1), statusRequest()])
+  await model.disconnect()
+  await model.pollStatus()
+  assert.equal(commands.length, 3)
+})
 test('四片设备状态通知保留微电流强度和模式的零值', async () => {
   const { model, report } = fixture()
   await model.connect()

@@ -5,17 +5,19 @@ import ChannelControl from './ChannelControl.vue'
 import IntensityChart from './IntensityChart.vue'
 import { useDevice } from './useDevice.js'
 
-const { motorReadings, intensityHistory, hasElectric, awaitingTimer, reportedTimerChannels, startTimer, refresh,
+const { motorReadings, intensityHistory, hasElectric, awaitingTimer, reportedTimerChannels, startTimer, refresh, pollStatus,
   available, reason, phase, battery, remaining, busy, stopping,
   message, debugBluetooth, connect, disconnect, apply, stop } = useDevice()
 const ready = computed(() => phase.value === 'ready')
 const chartClock = ref(Date.now())
 const chartEndTime = computed(() => Math.max(chartClock.value, intensityHistory.value.at(-1)?.time ?? 0))
 watch(ready, (connected, _, onCleanup) => {
-  const tick = () => { chartClock.value = Date.now() }
-  tick()
+  chartClock.value = Date.now()
   if (!connected) return
-  const timer = setInterval(tick, 1000)
+  const timer = setInterval(() => {
+    chartClock.value = Date.now()
+    void pollStatus()
+  }, 1000)
   onCleanup(() => clearInterval(timer))
 })
 const phaseNames = { idle: '未连接', choosing: '请选择设备', connecting: '连接中', ready: '已连接', disconnecting: '断开中' }
