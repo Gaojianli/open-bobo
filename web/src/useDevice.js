@@ -6,6 +6,8 @@ const discoveryOptions = () => ({
   exclusionFilters: [{ manufacturerData: [{ companyIdentifier: 0x05d6 }] }],
   optionalServices: [SERVICE]
 })
+const statusTimeoutMs = 3000
+const noStatusMessage = '设备未回报状态，已暂停自动查询。可点击「刷新状态」重试。'
 
 export function useDevice(env = globalThis) {
   const logger = env.console ?? console
@@ -48,7 +50,7 @@ export function useDevice(env = globalThis) {
 
   async function connect() {
     if (!available || active) return
-    const s = { tail: Promise.resolve(), mayBeRunning: false }
+    const s = { tail: Promise.resolve(), mayBeRunning: false, statusVersion: 0 }
     active = s
     phase.value = 'choosing'
     message.value = ''
@@ -75,6 +77,11 @@ export function useDevice(env = globalThis) {
         const msg = read(packet)
         if (!msg) return
         const status = readStatus(msg)
+        if (!Object.keys(status).length) return
+        s.statusVersion++
+        s.statusDeadline = null
+        s.statusRetried = s.statusPaused = false
+        if (message.value === noStatusMessage) message.value = '已收到设备状态。'
         if ('battery' in status) battery.value = status.battery
         for (const channel of ['vibration', 'suction', 'electric', 'electricMode']) {
           if (channel in status) motorReadings.value[channel] = status[channel]
@@ -105,25 +112,39 @@ export function useDevice(env = globalThis) {
     }
   }
 
-  function write(s, command) {
-    const run = async () => {
-      for (const packet of packets(command)) {
-        if (s !== active || !s.device.gatt.connected) throw Error('蓝牙已断开')
-        logPacket('TX', 'EE03', packet)
-        if (s.write.properties.write) await s.write.writeValueWithResponse(packet)
-        else await s.write.writeValueWithoutResponse(packet)
-      }
-    }
+  function enqueue(s, run) {
     const result = s.tail.then(run)
     s.tail = result.catch(() => {})
     return result
   }
 
+  function requireConnection(s) {
+    if (s !== active || !s.device.gatt.connected) throw Error('蓝牙已断开')
+  }
+
+  function write(s, command) {
+    return enqueue(s, async () => {
+      for (const packet of packets(command)) {
+        requireConnection(s)
+        logPacket('TX', 'EE03', packet)
+        if (s.write.properties.write) await s.write.writeValueWithResponse(packet)
+        else await s.write.writeValueWithoutResponse(packet)
+      }
+    })
+  }
+
   async function requestStatus(s) {
+    const statusVersion = s.statusVersion
     try {
       await write(s, statusRequest())
+      if (active === s && s.statusVersion === statusVersion) {
+        s.statusDeadline = Date.now() + statusTimeoutMs
+      }
     } catch (error) {
-      if (active === s) message.value = '读取状态请求失败：' + error.message
+      if (active === s) {
+        s.statusPaused = true
+        message.value = '读取状态请求失败：' + error.message
+      }
     }
   }
 
@@ -131,6 +152,7 @@ export function useDevice(env = globalThis) {
     const s = active
     if (phase.value !== 'ready' || busy.value || stopping.value) return
     busy.value = true
+    s.statusRetried = s.statusPaused = false
     try {
       await requestStatus(s)
     } finally {
@@ -140,10 +162,31 @@ export function useDevice(env = globalThis) {
 
   async function pollStatus() {
     const s = active
-    if (phase.value !== 'ready' || busy.value || stopping.value || awaitingTimer.value || s.polling) return
+    if (phase.value !== 'ready' || busy.value || stopping.value || awaitingTimer.value || s.polling || s.statusPaused) return
+    if (s.statusDeadline && Date.now() < s.statusDeadline) return
+    if (s.statusDeadline && s.statusRetried) {
+      s.statusPaused = true
+      message.value = noStatusMessage
+      return
+    }
     s.polling = true
     try {
+      if (s.statusDeadline) {
+        s.statusRetried = true
+        await enqueue(s, async () => {
+          requireConnection(s)
+          await s.notify.stopNotifications()
+          requireConnection(s)
+          await s.notify.startNotifications()
+        })
+      }
+      if (active !== s || phase.value !== 'ready') return
       await requestStatus(s)
+    } catch (error) {
+      if (active === s) {
+        s.statusPaused = true
+        message.value = '恢复设备通知失败：' + error.message
+      }
     } finally {
       s.polling = false
     }

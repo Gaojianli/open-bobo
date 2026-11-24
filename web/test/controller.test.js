@@ -186,8 +186,9 @@ test('应用设置和全部停止会重新请求状态，强度以设备通知�
   assert.deepEqual(model.intensityHistory.value.map(sample => sample.suction), [0, 49, 0])
 })
 test('周期查询不会重叠，并与用户控制共用写入队列', async () => {
-  const { model, write } = fixture()
+  const { model, write, report } = fixture()
   await model.connect()
+  report('2a01000100011100')
   const commands = []
   let release
   write.writeValueWithResponse = async packet => {
@@ -208,6 +209,37 @@ test('周期查询不会重叠，并与用户控制共用写入队列', async ()
   await model.disconnect()
   await model.pollStatus()
   assert.equal(commands.length, 3)
+})
+test('状态查询超时后重订阅一次，仍无回包则暂停直到手动刷新', async ({ mock }) => {
+  mock.timers.enable({ apis: ['Date'] })
+  const { model, writes, report, notify } = fixture()
+  const subscriptions = []
+  notify.startNotifications = async () => { subscriptions.push('start') }
+  notify.stopNotifications = async () => { subscriptions.push('stop') }
+  await model.connect()
+
+  mock.timers.tick(2999)
+  await model.pollStatus()
+  assert.equal(writes.length, 1)
+  mock.timers.tick(1)
+  await model.pollStatus()
+  assert.deepEqual(subscriptions, ['start', 'stop', 'start'])
+  assert.deepEqual(writes.map(packet => packet.slice(3)), [statusRequest(), statusRequest()])
+
+  mock.timers.tick(3000)
+  await model.pollStatus()
+  assert.match(model.message.value, /设备未回报状态/)
+  mock.timers.tick(10_000)
+  await model.pollStatus()
+  assert.equal(writes.length, 2)
+
+  await model.refresh()
+  assert.equal(writes.length, 3)
+  report('2a01000100071131')
+  assert.equal(model.motorReadings.value.suction, 49)
+  assert.match(model.message.value, /已收到设备状态/)
+  await model.pollStatus()
+  assert.equal(writes.length, 4)
 })
 test('四片设备状态通知保留微电流强度和模式的零值', async () => {
   const { model, report } = fixture()
