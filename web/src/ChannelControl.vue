@@ -13,6 +13,8 @@ import {
 const props = defineProps({
   channelLabel: { type: String, required: true },
   reported: Number,
+  reportedMode: Number,
+  electric: Boolean,
   disabled: { type: Boolean, default: false },
   resetKey: { type: Number, default: 0 },
 })
@@ -40,12 +42,15 @@ function apply() {
 
 <template>
   <v-card class="channel-control" variant="outlined">
-    <v-card-title class="channel-control__title">
+    <v-card-title tag="h3">
       {{ props.channelLabel }}
     </v-card-title>
 
     <v-card-text class="channel-control__fields">
-      <div class="readback">设备上报强度 · {{ props.reported ?? '待上报' }}</div>
+      <div class="readback">
+        设备上报强度 · {{ props.reported ?? '待上报' }}
+        <span v-if="props.electric"> · 模式 {{ props.reportedMode ?? '待上报' }}</span>
+      </div>
       <v-slider
         v-model="level"
         :label="`等级：${level}`"
@@ -73,42 +78,17 @@ function apply() {
     <v-card-actions class="channel-control__actions">
       <v-btn
         type="button"
-        class="apply-btn"
+        class="flex-grow-1"
         color="primary"
         variant="flat"
         min-height="44"
-        :disabled="props.disabled"
+        :disabled="props.disabled || (props.electric && level === 0)"
         @click="apply"
       >
-        应用设置
+        {{ props.electric ? '启动' : '应用设置' }}
       </v-btn>
       <v-btn variant="outlined" :disabled="props.disabled" min-height="44"
-        @click="level = 0; apply()">停止此电机</v-btn>
+        @click="level = 0; apply()">{{ props.electric ? '停止微电流' : '停止此电机' }}</v-btn>
     </v-card-actions>
   </v-card>
 </template>
-
-<style scoped>
-.apply-btn { flex: 1; }
-.readback { color: #55536b; }
-.channel-control {
-  width: 100%;
-  min-width: 0;
-}
-
-.channel-control__title {
-  white-space: normal;
-  overflow-wrap: anywhere;
-}
-
-.channel-control__fields {
-  display: flex;
-  flex-direction: column;
-  gap: 24px;
-  padding: 16px;
-}
-
-.channel-control__actions {
-  padding: 0 16px 16px;
-}
-</style>

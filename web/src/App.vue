@@ -1,34 +1,29 @@
 <script setup>
 import { computed, ref, watch } from 'vue'
-import { VApp, VBtn, VCard, VCardText, VCardTitle, VDialog, VMain, VSelect, VSwitch } from 'vuetify/components'
+import { VApp, VBtn, VCard, VCardActions, VCardText, VCardTitle, VCheckbox, VMain, VSelect, VSwitch } from 'vuetify/components'
 import ChannelControl from './ChannelControl.vue'
 import { useDevice } from './useDevice.js'
 
-const { identity, motorReadings, canScan, scanning, scanComplete, identify, awaitingTimer, startTimer, refresh,
+const { identity, motorReadings, hasElectric, canScan, scanning, scanComplete, identify, awaitingTimer, startTimer, refresh,
   available, reason, phase, name, battery, remaining, busy, stopping,
   message, debugBluetooth, connect, disconnect, apply, stop } = useDevice()
 const ready = computed(() => phase.value === 'ready')
-const hasElectric = computed(() =>
-  motorReadings.value.electric !== undefined || motorReadings.value.electricMode !== undefined
-)
 const phaseNames = { idle: '未连接', choosing: '请选择设备', connecting: '连接中', ready: '已连接', disconnecting: '断开中' }
 const locked = computed(() => remaining.value !== null && remaining.value > 0)
-const timerDialog = ref(false)
+const controlsDisabled = computed(() => !ready.value || busy.value || stopping.value || locked.value || awaitingTimer.value)
 const minutes = ref(1)
-const chosenMotor = ref('vibration')
-const motors = [{ id: 'vibration', label: '振动电机' }, { id: 'suction', label: '吸吮电机' }]
+const chosenMotors = ref(['vibration'])
+const motors = [{ id: 'vibration', label: '振动' }, { id: 'suction', label: '吸吮' }]
 const resetKey = ref(0)
-async function startLostMode() {
-  if (await startTimer(minutes.value, chosenMotor.value)) timerDialog.value = false
-}
-watch(phase, state => { if (state === 'idle') { resetKey.value++; timerDialog.value = false } })
+watch(phase, state => { if (state === 'idle') resetKey.value++ })
 async function stopAll() {
   if (await stop()) resetKey.value++
 }
-const time = computed(() => {
-  if (remaining.value === null) return '待上报'
+const timerStatus = computed(() => {
+  if (awaitingTimer.value) return '已请求开启，等待设备上报'
+  if (remaining.value === null) return '剩余时间待上报'
   if (!remaining.value) return '未开启'
-  return Math.floor(remaining.value / 60) + ' 分 ' + remaining.value % 60 + ' 秒'
+  return '上次上报剩余 ' + Math.floor(remaining.value / 60) + ' 分 ' + remaining.value % 60 + ' 秒'
 })
 </script>
 
@@ -56,47 +51,41 @@ const time = computed(() => {
         </div>
         <dl class="telemetry">
           <div v-if="ready"><dt>型号识别</dt><dd>{{ identity?.source ?? '版本待确认' }}<span v-if="identity?.pid"> · PID {{ identity.pid }}</span></dd></div>
-          <div v-if="ready && !hasElectric"><dt>微电流通道</dt><dd>待上报</dd></div>
           <div><dt>设备电量</dt><dd>{{ battery === null ? '待上报' : battery + '%' }}</dd></div>
-          <div><dt>失控模式 · 上次上报</dt><dd>{{ time }}</dd></div>
         </dl>
       </section>
       <p v-if="reason || message" class="notice" role="status">{{ reason || message }}</p>
-      <div class="section-heading"><h2>电机控制</h2><v-btn class="stop" variant="outlined"
+      <div class="section-heading"><h2>设备控制</h2><v-btn class="stop" variant="outlined"
         :disabled="!ready || stopping" :loading="stopping" @click="stopAll"><span class="stop-icon" aria-hidden="true"></span>全部停止</v-btn></div>
       <p v-if="locked" role="status">设备上报失控模式中，普通通道控制已暂停。</p>
-      <section class="channels" aria-label="输出通道">
+      <section class="channels" aria-label="输出通道和失控模式">
         <channel-control v-for="item in motors"
-          :key="item.id" :channel-label="item.label" :reported="motorReadings[item.id]" :reset-key="resetKey"
-          :disabled="!ready || busy || stopping || locked || awaitingTimer"
+          :key="item.id" :channel-label="item.label + '电机'" :reported="motorReadings[item.id]" :reset-key="resetKey"
+          :disabled="controlsDisabled"
           @apply="(level, mode) => apply(item.id, level, mode)" />
-        <v-card v-if="hasElectric" class="channel-control electric-channel" variant="outlined">
-          <v-card-title tag="h3">微电流通道</v-card-title>
-          <v-card-text>
-            <dl class="channel-readings">
-              <div><dt>设备上报强度</dt><dd>{{ motorReadings.electric ?? '待上报' }}</dd></div>
-              <div><dt>设备上报模式</dt><dd>{{ motorReadings.electricMode ?? '待上报' }}</dd></div>
-            </dl>
+        <channel-control channel-label="微电流通道" electric
+          :reported="motorReadings.electric" :reported-mode="motorReadings.electricMode" :reset-key="resetKey"
+          :disabled="controlsDisabled || !hasElectric"
+          @apply="(level, mode) => apply('electric', level, mode)" />
+        <v-card class="channel-control" variant="outlined">
+          <v-card-title tag="h3">失控模式</v-card-title>
+          <v-card-text class="channel-control__fields">
+            <p class="readback" role="status">{{ timerStatus }}</p>
+            <div class="timer-channels" role="group" aria-label="运行电机">
+              <v-checkbox v-for="item in motors" :key="item.id"
+                v-model="chosenMotors" :value="item.id" :label="item.label"
+                :disabled="controlsDisabled" color="primary" density="compact" hide-details />
+            </div>
+            <v-select v-model="minutes" :items="[1, 2, 3]" :disabled="controlsDisabled"
+              label="时长（分钟）" variant="outlined" hide-details />
           </v-card-text>
+          <v-card-actions class="channel-control__actions">
+            <v-btn type="button" class="flex-grow-1" color="primary" variant="flat" min-height="44"
+              :disabled="controlsDisabled || !chosenMotors.length"
+              @click="startTimer(minutes, chosenMotors)">开始</v-btn>
+          </v-card-actions>
         </v-card>
       </section>
-      <section class="timer-panel">
-        <div><h2>失控模式</h2>
-          <p>{{ awaitingTimer ? '已请求开启，等待设备上报' : locked ? '上次上报剩余 ' + time : '由设备计时运行所选电机' }}</p></div>
-        <v-btn variant="outlined" color="primary" :disabled="!ready || busy || stopping || locked || awaitingTimer"
-          @click="timerDialog = true">设置失控模式</v-btn>
-      </section>
-      <v-dialog v-model="timerDialog" max-width="420" aria-labelledby="timer-title">
-        <v-card class="timer-dialog">
-          <h2 id="timer-title">开启失控模式</h2>
-          <p>设备自行计时。开启后可能需要等到计时结束才能恢复手动控制。</p>
-          <v-select v-model="chosenMotor" :items="motors" item-title="label" item-value="id" label="运行电机" hide-details />
-          <v-select v-model="minutes" :items="[1, 2, 3]" label="时长（分钟）" hide-details />
-          <div class="timer-actions"><v-btn variant="text" @click="timerDialog = false">取消</v-btn>
-            <v-btn color="primary" :loading="busy" :disabled="!ready || busy || locked || stopping || awaitingTimer"
-              @click="startLostMode">确认开启</v-btn></div>
-        </v-card>
-      </v-dialog>
     </div>
   </v-main></v-app>
 </template>

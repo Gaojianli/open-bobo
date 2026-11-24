@@ -1,4 +1,4 @@
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
 import { discoveryOptions, readModel, scanModels } from './identity.js'
 import { statusRequest, timedMotor, SERVICE, NOTIFY, WRITE, motor, stopCommand, packets, notificationReader, readStatus } from './protocol.js'
 
@@ -12,6 +12,9 @@ export function useDevice(env = globalThis) {
   const debugBluetooth = ref(false)
   const identity = ref(null)
   const motorReadings = ref({})
+  const hasElectric = computed(() =>
+    motorReadings.value.electric !== undefined || motorReadings.value.electricMode !== undefined
+  )
   const awaitingTimer = ref(false)
   const scanning = ref(false)
   const canScan = available && typeof env.navigator.bluetooth.requestLEScan === 'function'
@@ -165,12 +168,14 @@ export function useDevice(env = globalThis) {
   async function apply(channel, level, mode) {
     const s = active
     if (phase.value !== 'ready' || busy.value || stopping.value || remaining.value > 0 || awaitingTimer.value) return false
+    if (channel === 'electric' && !hasElectric.value) return false
     busy.value = true
     try {
       const command = motor(channel, level, mode)
       if (level > 0) s.mayBeRunning = true
       await write(s, command)
-      if (active === s && !stopping.value) message.value = '已发送' + (channel === 'vibration' ? '振动' : '吸吮') + '设置。'
+      const label = { vibration: '振动', suction: '吸吮', electric: '微电流' }[channel]
+      if (active === s && !stopping.value) message.value = '已发送' + label + '设置。'
       return active === s
     } catch (error) {
       if (active === s) message.value = '写入失败：' + error.message
@@ -180,13 +185,13 @@ export function useDevice(env = globalThis) {
     }
   }
 
-  async function startTimer(minutes, channel) {
+  async function startTimer(minutes, channels) {
     const s = active
     if (phase.value !== 'ready' || busy.value || stopping.value || awaitingTimer.value || remaining.value > 0) return false
     busy.value = true
     let attempted = false
     try {
-      const command = timedMotor(minutes, channel)
+      const command = timedMotor(minutes, channels)
       awaitingTimer.value = true
       s.mayBeRunning = true
       attempted = true
@@ -238,5 +243,5 @@ export function useDevice(env = globalThis) {
     clear(s, remaining.value > 0 || awaitingTimer.value ? '已断开连接，设备定时可能仍在继续。' : '已断开连接。')
   }
 
-  return { scanComplete, identity, motorReadings, canScan, scanning, identify, awaitingTimer, startTimer, refresh, available, reason, phase, name, battery, remaining, message, busy, stopping, debugBluetooth, connect, apply, stop, disconnect }
+  return { scanComplete, identity, motorReadings, hasElectric, canScan, scanning, identify, awaitingTimer, startTimer, refresh, available, reason, phase, name, battery, remaining, message, busy, stopping, debugBluetooth, connect, apply, stop, disconnect }
 }

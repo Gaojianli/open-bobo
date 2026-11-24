@@ -3,11 +3,13 @@ export const SERVICE = uuid('ee01')
 export const NOTIFY = uuid('ee02')
 export const WRITE = uuid('ee03')
 
+const channelKeys = new Map([['vibration', 1], ['electric', 3], ['suction', 7]])
 export function motor(channel, level, mode) {
-  const key = { vibration: 1, suction: 7 }[channel]
-  if (![1, 7].includes(key) || ![0, 25, 50, 75, 100].includes(level) || ![1, 2, 3, 4].includes(mode)) {
+  const key = channelKeys.get(channel)
+  if (!key || ![0, 25, 50, 75, 100].includes(level) || ![1, 2, 3, 4].includes(mode)) {
     throw new RangeError('通道、强度或模式无效')
   }
+  if (channel === 'electric' && level === 0) return Uint8Array.of(1, 0, key, 0x11, 0)
   return Uint8Array.of(2, 0, key, 0x11, level, 0, key + 1, 0x11, mode)
 }
 
@@ -15,11 +17,15 @@ export const statusRequest = () => Uint8Array.of(1, 0, 0xc8, 0x11, 1)
 export const stopCommand = () => Uint8Array.of(3, 0, 1, 0x11, 0, 0, 3, 0x11, 0, 0, 7, 0x11, 0)
 
 // The duration is in minutes. The Web UI exposes the two mechanical channels.
-export function timedMotor(minutes, channel) {
-  const mask = { vibration: 1, suction: 2 }[channel]
-  if (![1, 2].includes(mask) || ![1, 2, 3].includes(minutes)) {
-    throw new RangeError('请选择电机和定时时长')
+const timedMotorFlags = new Map([['vibration', 1], ['suction', 2]])
+export function timedMotor(minutes, channels) {
+  let mask = 0
+  for (const channel of Array.isArray(channels) ? channels : [channels]) {
+    const flag = timedMotorFlags.get(channel)
+    if (!flag) throw new RangeError('请选择振动或吸吮')
+    mask |= flag
   }
+  if (!mask || ![1, 2, 3].includes(minutes)) throw new RangeError('请选择电机和定时时长')
   return Uint8Array.of(2, 0, 9, 0x11, minutes, 0, 11, 0x11, mask)
 }
 
