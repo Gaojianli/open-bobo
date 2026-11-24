@@ -8,7 +8,7 @@ const props = defineProps({
 })
 
 const windowMs = 60_000
-const plot = { left: 24, right: 166, top: 10, bottom: 53 }
+const plot = { left: 7, right: 171, top: 7, bottom: 64 }
 const points = computed(() => {
   const start = props.endTime - windowMs
   return props.samples
@@ -21,6 +21,10 @@ const points = computed(() => {
 })
 const line = computed(() => points.value.map(({ x, y }) => `${x},${y}`).join(' '))
 const last = computed(() => points.value.at(-1))
+const area = computed(() => {
+  if (points.value.length < 2) return ''
+  return `${points.value[0].x},${plot.bottom} ${line.value} ${last.value.x},${plot.bottom}`
+})
 const label = computed(() => last.value
   ? `最近 60 秒的通道强度，最新上报 ${last.value.level}`
   : '最近 60 秒的通道强度，等待设备上报')
@@ -29,17 +33,10 @@ const label = computed(() => last.value
 <template>
   <svg class="intensity-chart" viewBox="0 0 178 71" role="img" :aria-label="label">
     <title>{{ label }}</title>
-    <path class="grid" d="M24 10H166M24 31.5H166M24 53H166M24 10V53M95 10V53M166 10V53" />
-    <g class="ticks">
-      <text x="19" y="13" text-anchor="end">100</text>
-      <text x="19" y="34.5" text-anchor="end">50</text>
-      <text x="19" y="56" text-anchor="end">0</text>
-      <text x="24" y="65" text-anchor="middle">−60s</text>
-      <text x="95" y="65" text-anchor="middle">−30s</text>
-      <text x="166" y="65" text-anchor="middle">现在</text>
-      <text v-if="!last" x="95" y="34.5" text-anchor="middle">待上报</text>
-    </g>
-    <polyline v-if="points.length > 1" class="trace" :points="line" />
+    <template v-if="area">
+      <polygon class="area" :points="area" />
+      <polyline class="trace" :points="line" />
+    </template>
     <circle v-if="last" class="last-point" :cx="last.x" :cy="last.y" r="2.5" />
   </svg>
 </template>
@@ -53,8 +50,7 @@ const label = computed(() => last.value
   border: 1px solid #e8e5f4;
   border-radius: 9px;
 }
-.grid { fill: none; stroke: #e0ddef; stroke-width: 1; }
-.ticks { fill: #55536b; font-size: 9px; }
+.area { fill: rgb(var(--v-theme-primary)); fill-opacity: .18; }
 .trace { fill: none; stroke: rgb(var(--v-theme-primary)); stroke-width: 1.75; stroke-linecap: round; stroke-linejoin: round; }
 .last-point { fill: rgb(var(--v-theme-primary)); }
 </style>
