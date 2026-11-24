@@ -29,7 +29,7 @@ test('复合状态通知、缺片、截断和未知字段', () => {
   assert.equal(read(Uint8Array.of(42, 3)), undefined)
 })
 
-function fixture({ withoutResponse = false, logger, bluetooth = new EventTarget() } = {}) {
+function fixture({ withoutResponse = false, logger, bluetooth = new EventTarget(), localStorage } = {}) {
   const writes = []
   const notify = new EventTarget()
   notify.startNotifications = async () => notify
@@ -56,7 +56,7 @@ function fixture({ withoutResponse = false, logger, bluetooth = new EventTarget(
     assert.equal(options.acceptAllDevices, undefined)
     return device
   }
-  const model = useDevice({ console: logger, isSecureContext: true, navigator: { bluetooth } })
+  const model = useDevice({ console: logger, isSecureContext: true, navigator: { bluetooth }, localStorage })
   function report(hex) {
     const bytes = fromHex(hex)
     notify.value = new DataView(bytes.buffer)
@@ -103,7 +103,7 @@ for (const withoutResponse of [false, true]) {
     report('2a010001000a120000')
     assert.equal(await model.apply('suction', 50, 1), true)
     await model.disconnect()
-    assert.deepEqual(writes.map(p => p.slice(3)), [stopCommand(), motor('suction', 50, 1), stopCommand()])
+    assert.deepEqual(writes.map(p => p.slice(3)), [stopCommand(), fromHex('0100c81101'), motor('suction', 50, 1), stopCommand()])
     assert.equal(model.battery.value, null)
     assert.equal(model.phase.value, 'idle')
   })
@@ -205,6 +205,8 @@ test('连接后重试型号识别时只使用已连接设备的厂商广播', as
   model.debugBluetooth.value = true
   await model.connect()
   assert.equal(model.identity.value.source, null)
+  model.chooseModel('FUNF 啵啵贝')
+  assert.equal(model.identity.value.source, '手动确认')
   assert.ok(logs.some(message => message.startsWith('[BLE MODEL] 无法读取型号字段')))
   const scan = model.identify()
   function advertise(candidate, pid) {
@@ -214,7 +216,7 @@ test('连接后重试型号识别时只使用已连接设备的厂商广播', as
     }))
   }
   advertise({ id: 'another-bobo', name: device.name }, 3)
-  assert.equal(model.identity.value.source, null)
+  assert.equal(model.identity.value.source, '手动确认')
   advertise(device, 5)
   assert.equal(model.identity.value.model, 'FUNF 啵啵贝 Pro')
   assert.equal(model.identity.value.pid, '0005')
@@ -223,6 +225,29 @@ test('连接后重试型号识别时只使用已连接设备的厂商广播', as
   await scan
   assert.equal(model.identity.value, null)
   assert.equal(model.scanning.value, false)
+})
+test('手动确认的型号按浏览器设备 ID 保存，可清除并重新识别', async () => {
+  const values = new Map()
+  const localStorage = {
+    getItem: key => values.get(key),
+    setItem: (key, value) => values.set(key, value),
+    removeItem: key => values.delete(key)
+  }
+  const { model } = fixture({ localStorage })
+  await model.connect()
+  model.chooseModel('FUNF 啵啵贝 Pro')
+  assert.deepEqual(model.identity.value, { model: 'FUNF 啵啵贝 Pro', pid: null, source: '手动确认' })
+  assert.equal(model.hasElectric.value, false)
+  await model.disconnect()
+  const other = fixture({ localStorage })
+  other.device.id = 'other-bobo'
+  await other.model.connect()
+  assert.equal(other.model.identity.value.source, null)
+  await model.connect()
+  assert.equal(model.identity.value.model, 'FUNF 啵啵贝 Pro')
+  model.chooseModel(null)
+  assert.equal(model.identity.value.source, null)
+  assert.equal(values.size, 0)
 })
 test('四片设备状态通知保留微电流强度和模式的零值', async () => {
   const { model, report } = fixture()
@@ -236,6 +261,22 @@ test('四片设备状态通知保留微电流强度和模式的零值', async ()
   assert.equal(model.battery.value, 90)
   assert.deepEqual(model.reportedTimerChannels.value, [])
   assert.equal(model.identity.value.source, null)
+})
+test('定时运行中重连只收到配置时，定时归零后自动请求一次普通状态', async () => {
+  const { model, writes, report } = fixture()
+  await model.connect()
+  report('64 01 00 04 00 05 11 50 00 09 11 01 00 0A 12 00 1A 00 0B 11')
+  report('64 02 07')
+  assert.equal(model.battery.value, 80)
+  assert.equal(model.remaining.value, 26)
+  assert.deepEqual(model.reportedTimerChannels.value, ['vibration', 'suction', 'electric'])
+  assert.equal(model.hasElectric.value, false)
+  report('66 01 00 01 00 0A 12 00 00')
+  report('67 01 00 01 00 0A 12 00 00')
+  await Promise.resolve()
+  assert.deepEqual(writes.map(p => p.slice(3)), [fromHex('0100c81101'), fromHex('0100c81101')])
+  report('68 01 00 02 00 03 11 00 00 04 11 00')
+  assert.equal(model.hasElectric.value, true)
 })
 test('单独停止一个电机，能力由设备通知确认并在断开后清理', async () => {
   const { model, writes, report } = fixture()

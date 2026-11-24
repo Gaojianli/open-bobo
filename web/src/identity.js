@@ -11,10 +11,12 @@ export const discoveryOptions = () => ({
 const editions = new Map([
   [2, 'FUNF 啵啵贝'], [3, 'FUNF 啵啵贝'], [5, 'FUNF 啵啵贝 Pro'], [7, 'FUNF 啵啵贝 Pro']
 ])
+export const modelOptions = [...new Set(editions.values())]
+export const UNKNOWN_MODEL = '啵啵贝 · 版本待确认'
 
 export function fromPid(value, source) {
   const pid = value.toString(16).padStart(4, '0').toUpperCase()
-  return { model: editions.get(value) || '啵啵贝 · 版本待确认', pid, source }
+  return { model: editions.get(value) || UNKNOWN_MODEL, pid, source }
 }
 
 export function fromAdvertisement(data) {
@@ -36,7 +38,7 @@ export async function readModel(server, report) {
   } catch (error) {
     report?.(`无法读取型号字段：${error.message}`)
   }
-  return { model: '啵啵贝 · 版本待确认', pid: null, source: null }
+  return { model: UNKNOWN_MODEL, pid: null, source: null }
 }
 
 // Optional Web Bluetooth Scanning API. Cache by browser device ID, never by name.

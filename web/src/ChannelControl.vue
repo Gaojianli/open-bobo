@@ -15,7 +15,7 @@ const props = defineProps({
   reported: Number,
   reportedMode: Number,
   electric: Boolean,
-  unsupported: Boolean,
+  statusMessage: String,
   disabled: { type: Boolean, default: false },
   resetKey: { type: Number, default: 0 },
 })
@@ -45,7 +45,7 @@ function apply() {
     </v-card-title>
 
     <v-card-text class="channel-control__fields">
-      <p v-if="props.unsupported" class="readback" role="status">设备不支持</p>
+      <p v-if="props.statusMessage" class="readback" role="status">{{ props.statusMessage }}</p>
       <div v-else class="readback">
         设备上报强度 · {{ props.reported ?? '待上报' }}
         <span v-if="props.electric"> · 模式 {{ modes[props.reportedMode - 1]?.title ?? props.reportedMode ?? '待上报' }}</span>

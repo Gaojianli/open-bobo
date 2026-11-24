@@ -1,6 +1,8 @@
 import { computed, ref } from 'vue'
-import { discoveryOptions, readModel, scanModels } from './identity.js'
+import { discoveryOptions, modelOptions, readModel, scanModels, UNKNOWN_MODEL } from './identity.js'
 import { statusRequest, timedMotor, SERVICE, NOTIFY, WRITE, motor, stopCommand, packets, notificationReader, readStatus } from './protocol.js'
+
+const modelStorageKey = id => `open-bobo:model:${id}`
 
 export function useDevice(env = globalThis) {
   const logger = env.console ?? console
@@ -10,7 +12,12 @@ export function useDevice(env = globalThis) {
   const phase = ref('idle'), name = ref(''), battery = ref(null), remaining = ref(null)
   const message = ref(''), busy = ref(false), stopping = ref(false)
   const debugBluetooth = ref(false)
-  const identity = ref(null)
+  const detectedIdentity = ref(null)
+  const manualModel = ref(null)
+  const modelUnconfirmed = computed(() => detectedIdentity.value?.model === UNKNOWN_MODEL)
+  const identity = computed(() => modelUnconfirmed.value && manualModel.value
+    ? { ...detectedIdentity.value, model: manualModel.value, source: '手动确认' }
+    : detectedIdentity.value)
   const motorReadings = ref({})
   const hasElectric = computed(() =>
     motorReadings.value.electric !== undefined || motorReadings.value.electricMode !== undefined
@@ -23,6 +30,17 @@ export function useDevice(env = globalThis) {
   const profiles = new Map()
   let active = null
   let scanController = null
+
+  function chooseModel(model) {
+    const id = active?.device?.id
+    if (phase.value !== 'ready' || !modelUnconfirmed.value || !id || (model !== null && !modelOptions.includes(model))) return
+    manualModel.value = model
+    try {
+      const key = modelStorageKey(id)
+      if (model === null) env.localStorage?.removeItem(key)
+      else env.localStorage?.setItem(key, model)
+    } catch { /* The current connection can still use the choice. */ }
+  }
 
   function logPacket(direction, characteristic, bytes) {
     if (!debugBluetooth.value) return
@@ -45,7 +63,7 @@ export function useDevice(env = globalThis) {
         matches++
         if (active?.device?.id === id) {
           if (profile.repair) clear(active, '该设备正在维修模式，无法控制。')
-          else identity.value = profile
+          else detectedIdentity.value = profile
         }
       }, controller.signal, event => {
         if (!debugBluetooth.value || (session && session.device.id !== event.device.id)) return
@@ -69,7 +87,7 @@ export function useDevice(env = globalThis) {
     if (active !== session) return
     active = null
     scanController?.abort()
-    identity.value = null
+    detectedIdentity.value = manualModel.value = null
     scanComplete.value = false
     motorReadings.value = {}
     awaitingTimer.value = false
@@ -104,7 +122,13 @@ export function useDevice(env = globalThis) {
         if (debugBluetooth.value && active === s) logger.info(`[BLE MODEL] ${text}`)
       })
       if (active !== s) return
-      identity.value = profiles.get(s.device.id) || profile
+      detectedIdentity.value = profiles.get(s.device.id) || profile
+      if (s.device.id) {
+        try {
+          const saved = env.localStorage?.getItem(modelStorageKey(s.device.id))
+          if (modelOptions.includes(saved)) manualModel.value = saved
+        } catch { /* Local storage is optional. */ }
+      }
       s.write = await service.getCharacteristic(WRITE)
       if (!s.write.properties.write && !s.write.properties.writeWithoutResponse) throw Error('EE03 不支持写入')
       s.notify = await service.getCharacteristic(NOTIFY)
@@ -121,11 +145,13 @@ export function useDevice(env = globalThis) {
         for (const channel of ['vibration', 'suction', 'electric', 'electricMode']) {
           if (channel in status) motorReadings.value[channel] = status[channel]
         }
+        const timerEnded = remaining.value > 0 && status.remaining === 0
         if ('remaining' in status) {
           remaining.value = status.remaining
           awaitingTimer.value = false
         }
         if ('timerChannels' in status) reportedTimerChannels.value = status.timerChannels
+        if (timerEnded && phase.value === 'ready' && !hasElectric.value) void requestStatus(s)
       }
       if (active !== s) return
       s.notify.addEventListener('characteristicvaluechanged', s.receive)
@@ -155,14 +181,20 @@ export function useDevice(env = globalThis) {
     return result
   }
 
+  async function requestStatus(s) {
+    try {
+      await write(s, statusRequest())
+    } catch (error) {
+      if (active === s) message.value = '读取状态请求失败：' + error.message
+    }
+  }
+
   async function refresh() {
     const s = active
     if (phase.value !== 'ready' || busy.value || stopping.value) return
     busy.value = true
     try {
-      await write(s, statusRequest())
-    } catch (error) {
-      if (active === s) message.value = '读取状态请求失败：' + error.message
+      await requestStatus(s)
     } finally {
       if (active === s) busy.value = false
     }
@@ -249,5 +281,5 @@ export function useDevice(env = globalThis) {
     clear(s, remaining.value > 0 || awaitingTimer.value ? '已断开连接，设备定时可能仍在继续。' : '已断开连接。')
   }
 
-  return { scanComplete, identity, motorReadings, hasElectric, canScan, scanning, identify, awaitingTimer, reportedTimerChannels, startTimer, refresh, available, reason, phase, name, battery, remaining, message, busy, stopping, debugBluetooth, connect, apply, stop, disconnect }
+  return { scanComplete, identity, modelUnconfirmed, manualModel, chooseModel, motorReadings, hasElectric, canScan, scanning, identify, awaitingTimer, reportedTimerChannels, startTimer, refresh, available, reason, phase, name, battery, remaining, message, busy, stopping, debugBluetooth, connect, apply, stop, disconnect }
 }

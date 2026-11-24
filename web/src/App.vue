@@ -2,14 +2,21 @@
 import { computed, ref, watch } from 'vue'
 import { VApp, VBtn, VCard, VCardActions, VCardText, VCardTitle, VCheckbox, VMain, VSelect, VSwitch } from 'vuetify/components'
 import ChannelControl from './ChannelControl.vue'
+import { modelOptions } from './identity.js'
 import { useDevice } from './useDevice.js'
 
-const { identity, motorReadings, hasElectric, canScan, scanning, scanComplete, identify, awaitingTimer, reportedTimerChannels, startTimer, refresh,
+const { identity, modelUnconfirmed, manualModel, chooseModel, motorReadings, hasElectric, canScan, scanning, scanComplete, identify, awaitingTimer, reportedTimerChannels, startTimer, refresh,
   available, reason, phase, name, battery, remaining, busy, stopping,
   message, debugBluetooth, connect, disconnect, apply, stop } = useDevice()
 const ready = computed(() => phase.value === 'ready')
 const phaseNames = { idle: '未连接', choosing: '请选择设备', connecting: '连接中', ready: '已连接', disconnecting: '断开中' }
 const locked = computed(() => remaining.value !== null && remaining.value > 0)
+const electricStatus = computed(() => {
+  if (!ready.value || hasElectric.value) return ''
+  if (locked.value) return '待定时结束后确认'
+  if (motorReadings.value.vibration !== undefined || motorReadings.value.suction !== undefined) return '设备不支持'
+  return '等待设备上报'
+})
 const controlsDisabled = computed(() => !ready.value || busy.value || stopping.value || locked.value || awaitingTimer.value)
 const minutes = ref(1)
 const chosenChannels = ref(['vibration'])
@@ -52,11 +59,14 @@ const reportedChannelsLabel = computed(() => timerChannels
             :disabled="!available || phase !== 'idle'" :loading="phase === 'connecting'" @click="connect">连接设备</v-btn>
           <v-btn v-else class="link-device" size="large" :loading="phase === 'disconnecting'" @click="disconnect">断开连接</v-btn>
           <v-btn v-if="ready" class="ml-2" variant="text" :disabled="busy || stopping" @click="refresh">刷新状态</v-btn>
-          <v-btn v-if="ready && canScan && !identity?.source" variant="text"
+          <v-btn v-if="ready && canScan && modelUnconfirmed" variant="text"
             :loading="scanning" @click="identify">重新识别型号</v-btn>
+          <v-select v-if="ready && modelUnconfirmed" class="model-select" :model-value="manualModel" :items="modelOptions"
+            label="手动确认型号" density="compact" variant="outlined" base-color="#e2e0f3" color="white"
+            clearable hide-details @update:model-value="chooseModel" />
         </div>
         <dl class="telemetry">
-          <div v-if="ready"><dt>型号识别</dt><dd>{{ identity?.source ?? '版本待确认' }}<span v-if="identity?.pid"> · PID {{ identity.pid }}</span></dd></div>
+          <div v-if="ready"><dt>型号识别</dt><dd>{{ identity?.source ?? (canScan ? '版本待确认' : '浏览器未提供广播扫描') }}<span v-if="identity?.pid"> · PID {{ identity.pid }}</span></dd></div>
           <div><dt>设备电量</dt><dd>{{ battery === null ? '待上报' : battery + '%' }}</dd></div>
         </dl>
       </section>
@@ -71,7 +81,7 @@ const reportedChannelsLabel = computed(() => timerChannels
           @apply="(level, mode) => apply(item.id, level, mode)" />
         <channel-control channel-label="微电流通道" electric
           :reported="motorReadings.electric" :reported-mode="motorReadings.electricMode" :reset-key="resetKey"
-          :unsupported="ready && !hasElectric"
+          :status-message="electricStatus"
           :disabled="controlsDisabled || !hasElectric"
           @apply="(level, mode) => apply('electric', level, mode)" />
         <v-card class="channel-control" variant="outlined">
