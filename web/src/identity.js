@@ -11,7 +11,6 @@ export const discoveryOptions = () => ({
 const editions = new Map([
   [2, 'FUNF 啵啵贝'], [3, 'FUNF 啵啵贝'], [5, 'FUNF 啵啵贝 Pro'], [7, 'FUNF 啵啵贝 Pro']
 ])
-export const modelOptions = [...new Set(editions.values())]
 export const UNKNOWN_MODEL = '啵啵贝 · 版本待确认'
 
 export function fromPid(value, source) {

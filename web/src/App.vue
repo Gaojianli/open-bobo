@@ -2,13 +2,22 @@
 import { computed, ref, watch } from 'vue'
 import { VApp, VBtn, VCard, VCardActions, VCardText, VCardTitle, VCheckbox, VMain, VSelect, VSwitch } from 'vuetify/components'
 import ChannelControl from './ChannelControl.vue'
-import { modelOptions } from './identity.js'
+import IntensityChart from './IntensityChart.vue'
 import { useDevice } from './useDevice.js'
 
-const { identity, modelUnconfirmed, manualModel, chooseModel, motorReadings, hasElectric, canScan, scanning, scanComplete, identify, awaitingTimer, reportedTimerChannels, startTimer, refresh,
+const { identity, modelUnconfirmed, motorReadings, intensityHistory, hasElectric, canScan, scanning, scanComplete, identify, awaitingTimer, reportedTimerChannels, startTimer, refresh,
   available, reason, phase, name, battery, remaining, busy, stopping,
   message, debugBluetooth, connect, disconnect, apply, stop } = useDevice()
 const ready = computed(() => phase.value === 'ready')
+const chartClock = ref(Date.now())
+const chartEndTime = computed(() => Math.max(chartClock.value, intensityHistory.value.at(-1)?.time ?? 0))
+watch(ready, (connected, _, onCleanup) => {
+  const tick = () => { chartClock.value = Date.now() }
+  tick()
+  if (!connected) return
+  const timer = setInterval(tick, 1000)
+  onCleanup(() => clearInterval(timer))
+})
 const phaseNames = { idle: '未连接', choosing: '请选择设备', connecting: '连接中', ready: '已连接', disconnecting: '断开中' }
 const locked = computed(() => remaining.value !== null && remaining.value > 0)
 const electricStatus = computed(() => {
@@ -61,9 +70,6 @@ const reportedChannelsLabel = computed(() => timerChannels
           <v-btn v-if="ready" class="ml-2" variant="text" :disabled="busy || stopping" @click="refresh">刷新状态</v-btn>
           <v-btn v-if="ready && canScan && modelUnconfirmed" variant="text"
             :loading="scanning" @click="identify">重新识别型号</v-btn>
-          <v-select v-if="ready && modelUnconfirmed" class="model-select" :model-value="manualModel" :items="modelOptions"
-            label="手动确认型号" density="compact" variant="outlined" base-color="#e2e0f3" color="white"
-            clearable hide-details @update:model-value="chooseModel" />
         </div>
         <dl class="telemetry">
           <div v-if="ready"><dt>型号识别</dt><dd>{{ identity?.source ?? (canScan ? '版本待确认' : '浏览器未提供广播扫描') }}<span v-if="identity?.pid"> · PID {{ identity.pid }}</span></dd></div>
@@ -78,12 +84,20 @@ const reportedChannelsLabel = computed(() => timerChannels
         <channel-control v-for="item in motors"
           :key="item.id" :channel-label="item.label + '电机'" :reported="motorReadings[item.id]" :reset-key="resetKey"
           :disabled="controlsDisabled"
-          @apply="(level, mode) => apply(item.id, level, mode)" />
+          @apply="(level, mode) => apply(item.id, level, mode)">
+          <template #chart>
+            <intensity-chart :samples="intensityHistory" :channel="item.id" :end-time="chartEndTime" />
+          </template>
+        </channel-control>
         <channel-control channel-label="微电流通道" electric
           :reported="motorReadings.electric" :reported-mode="motorReadings.electricMode" :reset-key="resetKey"
           :status-message="electricStatus"
           :disabled="controlsDisabled || !hasElectric"
-          @apply="(level, mode) => apply('electric', level, mode)" />
+          @apply="(level, mode) => apply('electric', level, mode)">
+          <template #chart>
+            <intensity-chart :samples="intensityHistory" channel="electric" :end-time="chartEndTime" />
+          </template>
+        </channel-control>
         <v-card class="channel-control" variant="outlined">
           <v-card-title tag="h3">失控模式</v-card-title>
           <v-card-text class="channel-control__fields">

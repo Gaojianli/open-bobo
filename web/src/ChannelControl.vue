@@ -40,16 +40,19 @@ function apply() {
 
 <template>
   <v-card class="channel-control" variant="outlined">
-    <v-card-title tag="h3">
-      {{ props.channelLabel }}
-    </v-card-title>
+    <div class="channel-control__header">
+      <div>
+        <v-card-title tag="h3">{{ props.channelLabel }}</v-card-title>
+        <p v-if="props.statusMessage" class="readback channel-control__readback" role="status">{{ props.statusMessage }}</p>
+        <p v-else class="readback channel-control__readback">
+          设备上报强度 · {{ props.reported ?? '待上报' }}
+          <span v-if="props.electric"> · 模式 {{ modes[props.reportedMode - 1]?.title ?? props.reportedMode ?? '待上报' }}</span>
+        </p>
+      </div>
+      <slot name="chart" />
+    </div>
 
     <v-card-text class="channel-control__fields">
-      <p v-if="props.statusMessage" class="readback" role="status">{{ props.statusMessage }}</p>
-      <div v-else class="readback">
-        设备上报强度 · {{ props.reported ?? '待上报' }}
-        <span v-if="props.electric"> · 模式 {{ modes[props.reportedMode - 1]?.title ?? props.reportedMode ?? '待上报' }}</span>
-      </div>
       <v-slider
         v-model="level"
         :label="`等级：${level}`"

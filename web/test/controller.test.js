@@ -29,7 +29,7 @@ test('复合状态通知、缺片、截断和未知字段', () => {
   assert.equal(read(Uint8Array.of(42, 3)), undefined)
 })
 
-function fixture({ withoutResponse = false, logger, bluetooth = new EventTarget(), localStorage } = {}) {
+function fixture({ withoutResponse = false, logger, bluetooth = new EventTarget() } = {}) {
   const writes = []
   const notify = new EventTarget()
   notify.startNotifications = async () => notify
@@ -56,7 +56,7 @@ function fixture({ withoutResponse = false, logger, bluetooth = new EventTarget(
     assert.equal(options.acceptAllDevices, undefined)
     return device
   }
-  const model = useDevice({ console: logger, isSecureContext: true, navigator: { bluetooth }, localStorage })
+  const model = useDevice({ console: logger, isSecureContext: true, navigator: { bluetooth } })
   function report(hex) {
     const bytes = fromHex(hex)
     notify.value = new DataView(bytes.buffer)
@@ -205,8 +205,7 @@ test('连接后重试型号识别时只使用已连接设备的厂商广播', as
   model.debugBluetooth.value = true
   await model.connect()
   assert.equal(model.identity.value.source, null)
-  model.chooseModel('FUNF 啵啵贝')
-  assert.equal(model.identity.value.source, '手动确认')
+  assert.equal(model.modelUnconfirmed.value, true)
   assert.ok(logs.some(message => message.startsWith('[BLE MODEL] 无法读取型号字段')))
   const scan = model.identify()
   function advertise(candidate, pid) {
@@ -216,38 +215,30 @@ test('连接后重试型号识别时只使用已连接设备的厂商广播', as
     }))
   }
   advertise({ id: 'another-bobo', name: device.name }, 3)
-  assert.equal(model.identity.value.source, '手动确认')
+  assert.equal(model.identity.value.source, null)
   advertise(device, 5)
   assert.equal(model.identity.value.model, 'FUNF 啵啵贝 Pro')
   assert.equal(model.identity.value.pid, '0005')
+  assert.equal(model.modelUnconfirmed.value, false)
   assert.deepEqual(logs.filter(message => message.startsWith('[BLE ADV')), ['[BLE ADV 1234] 00 00 05'])
   await model.disconnect()
   await scan
   assert.equal(model.identity.value, null)
   assert.equal(model.scanning.value, false)
 })
-test('手动确认的型号按浏览器设备 ID 保存，可清除并重新识别', async () => {
-  const values = new Map()
-  const localStorage = {
-    getItem: key => values.get(key),
-    setItem: (key, value) => values.set(key, value),
-    removeItem: key => values.delete(key)
-  }
-  const { model } = fixture({ localStorage })
+test('强度历史保留实际通道上报和零值，断开时清空', async () => {
+  const { model, report } = fixture()
   await model.connect()
-  model.chooseModel('FUNF 啵啵贝 Pro')
-  assert.deepEqual(model.identity.value, { model: 'FUNF 啵啵贝 Pro', pid: null, source: '手动确认' })
-  assert.equal(model.hasElectric.value, false)
+  report('2a010003000111190003110000071132')
+  report('2a0100010005115a')
+  report('2a01000100011100')
+  const [sample, next] = model.intensityHistory.value
+  assert.equal(model.intensityHistory.value.length, 2)
+  assert.deepEqual(sample, { time: sample.time, vibration: 25, suction: 50, electric: 0 })
+  assert.deepEqual(next, { time: next.time, vibration: 0, suction: undefined, electric: undefined })
+  assert.ok(sample.time <= next.time)
   await model.disconnect()
-  const other = fixture({ localStorage })
-  other.device.id = 'other-bobo'
-  await other.model.connect()
-  assert.equal(other.model.identity.value.source, null)
-  await model.connect()
-  assert.equal(model.identity.value.model, 'FUNF 啵啵贝 Pro')
-  model.chooseModel(null)
-  assert.equal(model.identity.value.source, null)
-  assert.equal(values.size, 0)
+  assert.deepEqual(model.intensityHistory.value, [])
 })
 test('四片设备状态通知保留微电流强度和模式的零值', async () => {
   const { model, report } = fixture()
