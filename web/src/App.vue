@@ -1,6 +1,6 @@
 <script setup>
 import { computed, ref, watch } from 'vue'
-import { VApp, VBtn, VCard, VDialog, VMain, VSelect, VSwitch } from 'vuetify/components'
+import { VApp, VBtn, VCard, VCardText, VCardTitle, VDialog, VMain, VSelect, VSwitch } from 'vuetify/components'
 import ChannelControl from './ChannelControl.vue'
 import { useDevice } from './useDevice.js'
 
@@ -8,6 +8,9 @@ const { identity, motorReadings, canScan, scanning, scanComplete, identify, awai
   available, reason, phase, name, battery, remaining, busy, stopping,
   message, debugBluetooth, connect, disconnect, apply, stop } = useDevice()
 const ready = computed(() => phase.value === 'ready')
+const hasElectric = computed(() =>
+  motorReadings.value.electric !== undefined || motorReadings.value.electricMode !== undefined
+)
 const phaseNames = { idle: '未连接', choosing: '请选择设备', connecting: '连接中', ready: '已连接', disconnecting: '断开中' }
 const locked = computed(() => remaining.value !== null && remaining.value > 0)
 const timerDialog = ref(false)
@@ -48,10 +51,12 @@ const time = computed(() => {
             :disabled="!available || phase !== 'idle'" :loading="phase === 'connecting'" @click="connect">连接设备</v-btn>
           <v-btn v-else class="link-device" size="large" :loading="phase === 'disconnecting'" @click="disconnect">断开连接</v-btn>
           <v-btn v-if="ready" class="ml-2" variant="text" :disabled="busy || stopping" @click="refresh">刷新状态</v-btn>
+          <v-btn v-if="ready && canScan && !identity?.source" variant="text"
+            :loading="scanning" @click="identify">重新识别型号</v-btn>
         </div>
         <dl class="telemetry">
-          <div v-if="ready"><dt>型号识别</dt><dd>{{ identity?.source }}<span v-if="identity?.pid"> · PID {{ identity.pid }}</span></dd></div>
-          <div v-if="ready"><dt>微电流功能</dt><dd>{{ (motorReadings.electric !== undefined || motorReadings.electricMode !== undefined) ? '已上报通道' : '尚未确认' }}</dd></div>
+          <div v-if="ready"><dt>型号识别</dt><dd>{{ identity?.source ?? '版本待确认' }}<span v-if="identity?.pid"> · PID {{ identity.pid }}</span></dd></div>
+          <div v-if="ready && !hasElectric"><dt>微电流通道</dt><dd>待上报</dd></div>
           <div><dt>设备电量</dt><dd>{{ battery === null ? '待上报' : battery + '%' }}</dd></div>
           <div><dt>失控模式 · 上次上报</dt><dd>{{ time }}</dd></div>
         </dl>
@@ -65,6 +70,15 @@ const time = computed(() => {
           :key="item.id" :channel-label="item.label" :reported="motorReadings[item.id]" :reset-key="resetKey"
           :disabled="!ready || busy || stopping || locked || awaitingTimer"
           @apply="(level, mode) => apply(item.id, level, mode)" />
+        <v-card v-if="hasElectric" class="channel-control electric-channel" variant="outlined">
+          <v-card-title tag="h3">微电流通道</v-card-title>
+          <v-card-text>
+            <dl class="channel-readings">
+              <div><dt>设备上报强度</dt><dd>{{ motorReadings.electric ?? '待上报' }}</dd></div>
+              <div><dt>设备上报模式</dt><dd>{{ motorReadings.electricMode ?? '待上报' }}</dd></div>
+            </dl>
+          </v-card-text>
+        </v-card>
       </section>
       <section class="timer-panel">
         <div><h2>失控模式</h2>

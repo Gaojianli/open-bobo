@@ -25,21 +25,25 @@ export function fromAdvertisement(data) {
   return value.byteLength >= 3 ? fromPid(value.getUint16(1, false), '厂商广播') : null
 }
 
-export async function readModel(server) {
+export async function readModel(server, report) {
   try {
     const service = await server.getPrimaryService(DEVICE_INFO)
     const characteristic = await service.getCharacteristic('model_number_string')
     const value = await characteristic.readValue()
     const label = new TextDecoder().decode(value).replace(/\0/g, '').trim()
+    report?.(`型号字段 model_number_string = ${JSON.stringify(label)}`)
     if (label && label.toUpperCase() !== 'SOSEXY') return { model: label, pid: null, source: '设备型号字段' }
-  } catch { /* Optional service; many peripherals expose only EE01. */ }
-  return { model: '啵啵贝 · 版本待确认', pid: null, source: '已核对控制服务' }
+  } catch (error) {
+    report?.(`无法读取型号字段：${error.message}`)
+  }
+  return { model: '啵啵贝 · 版本待确认', pid: null, source: null }
 }
 
 // Optional Web Bluetooth Scanning API. Cache by browser device ID, never by name.
-export async function scanModels(bluetooth, found, signal) {
+export async function scanModels(bluetooth, found, signal, inspect) {
   function receive(event) {
-    if (!event.device?.id || !(event.name || event.device.name || '').startsWith('SOSEXY')) return
+    if (signal.aborted || !event.device?.id || !(event.name || event.device.name || '').startsWith('SOSEXY')) return
+    inspect?.(event)
     if (event.manufacturerData?.has(REPAIR_ID)) found(event.device.id, { repair: true })
     else {
       const profile = fromAdvertisement(event.manufacturerData)

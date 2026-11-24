@@ -28,6 +28,10 @@ h2 { font-size: 1.45rem; }
 .channels .channel-control { background: white; border: 1px solid #dcdeea; border-radius: 18px; padding: 9px; }
 .channels .v-card-title { font-weight: 700; color: #292643; }
 .channels .v-card-actions .v-btn { font-weight: 650; }
+.electric-channel { grid-column: 1 / -1; }
+.channel-readings { display: flex; flex-wrap: wrap; gap: 12px 40px; }
+.channel-readings dt { color: #55536b; }
+.channel-readings dd { margin: 4px 0 0; font-weight: 650; }
 @media (max-width: 640px) {
   .shell { width: calc(100% - 28px); padding-top: 16px; }
   header { margin-bottom: 16px; }

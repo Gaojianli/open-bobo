@@ -27,7 +27,7 @@ test('复合状态通知、缺片、截断和未知字段', () => {
   assert.equal(read(Uint8Array.of(42, 3)), undefined)
 })
 
-function fixture({ withoutResponse = false, logger } = {}) {
+function fixture({ withoutResponse = false, logger, bluetooth = new EventTarget() } = {}) {
   const writes = []
   const notify = new EventTarget()
   notify.startNotifications = async () => notify
@@ -48,9 +48,13 @@ function fixture({ withoutResponse = false, logger } = {}) {
     async getPrimaryService(id) { assert.equal(id, SERVICE); return service },
     disconnect() { this.connected = false; device.dispatchEvent(new Event('gattserverdisconnected')) }
   }
-  const model = useDevice({ console: logger, isSecureContext: true, navigator: { bluetooth: {
-    async requestDevice(options) { assert.deepEqual(options.filters, [{ namePrefix: 'SOSEXY' }]); assert.ok(options.optionalServices.includes(SERVICE)); assert.equal(options.acceptAllDevices, undefined); return device }
-  } } })
+  bluetooth.requestDevice = async options => {
+    assert.deepEqual(options.filters, [{ namePrefix: 'SOSEXY' }])
+    assert.ok(options.optionalServices.includes(SERVICE))
+    assert.equal(options.acceptAllDevices, undefined)
+    return device
+  }
+  const model = useDevice({ console: logger, isSecureContext: true, navigator: { bluetooth } })
   function report(hex) {
     const bytes = fromHex(hex)
     notify.value = new DataView(bytes.buffer)
@@ -190,6 +194,45 @@ test('读取可选 GATT 型号，通用广播名保留版本未知', async () =>
   } })
   assert.equal((await readModel(server('FUNF 啵啵贝 Pro'))).model, 'FUNF 啵啵贝 Pro')
   assert.match((await readModel(server('SOSEXY'))).model, /待确认/)
+})
+test('连接后重试型号识别时只使用已连接设备的厂商广播', async () => {
+  const bluetooth = new EventTarget()
+  bluetooth.requestLEScan = async () => ({ stop() {} })
+  const logs = []
+  const { model, device } = fixture({ bluetooth, logger: { info: message => logs.push(message) } })
+  model.debugBluetooth.value = true
+  await model.connect()
+  assert.equal(model.identity.value.source, null)
+  assert.ok(logs.some(message => message.startsWith('[BLE MODEL] 无法读取型号字段')))
+  const scan = model.identify()
+  function advertise(candidate, pid) {
+    bluetooth.dispatchEvent(Object.assign(new Event('advertisementreceived'), {
+      device: candidate,
+      manufacturerData: new Map([[0x1234, new DataView(Uint8Array.of(0, 0, pid).buffer)]])
+    }))
+  }
+  advertise({ id: 'another-bobo', name: device.name }, 3)
+  assert.equal(model.identity.value.source, null)
+  advertise(device, 5)
+  assert.equal(model.identity.value.model, '啵啵贝 Pro')
+  assert.equal(model.identity.value.pid, '0005')
+  assert.deepEqual(logs.filter(message => message.startsWith('[BLE ADV')), ['[BLE ADV 1234] 00 00 05'])
+  await model.disconnect()
+  await scan
+  assert.equal(model.identity.value, null)
+  assert.equal(model.scanning.value, false)
+})
+test('四片设备状态通知保留微电流强度和模式的零值', async () => {
+  const { model, report } = fixture()
+  await model.connect()
+  report('01 01 00 0D 00 05 11 5A 00 01 11 00 00 02 11 00 00 03 11 00')
+  report('01 02 00 04 11 00 00 07 11 00 00 08 11 00 00 09 11 00 00 0A')
+  report('01 03 12 00 00 00 0B 11 00 00 0C AF 00 0D 00 00 00 00 00 00')
+  assert.deepEqual(model.motorReadings.value, {})
+  report('01 04 00 00 00 00 00 00 00 00 0D 11 01 00 0E 11 01')
+  assert.deepEqual(model.motorReadings.value, { vibration: 0, suction: 0, electric: 0, electricMode: 0 })
+  assert.equal(model.battery.value, 90)
+  assert.equal(model.identity.value.source, null)
 })
 test('单独停止一个电机，能力由设备通知确认并在断开后清理', async () => {
   const { model, writes, report } = fixture()

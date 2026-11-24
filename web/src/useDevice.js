@@ -3,6 +3,7 @@ import { discoveryOptions, readModel, scanModels } from './identity.js'
 import { statusRequest, timedMotor, SERVICE, NOTIFY, WRITE, motor, stopCommand, packets, notificationReader, readStatus } from './protocol.js'
 
 export function useDevice(env = globalThis) {
+  const logger = env.console ?? console
   const available = Boolean(env.isSecureContext && env.navigator?.bluetooth?.requestDevice)
   const reason = !env.isSecureContext ? '蓝牙连接需要 HTTPS 或 localhost。'
     : available ? '' : '当前浏览器未提供 Web Bluetooth，请用支持的 Chrome 或 Edge 打开。'
@@ -22,31 +23,39 @@ export function useDevice(env = globalThis) {
   function logPacket(direction, characteristic, bytes) {
     if (!debugBluetooth.value) return
     const hex = Array.from(bytes, byte => byte.toString(16).padStart(2, '0')).join(' ').toUpperCase()
-    const logger = env.console ?? console
     logger.info(`[BLE ${direction} ${characteristic}] ${hex}`)
   }
 
   async function identify() {
-    if (!canScan || scanning.value) return
+    const session = active
+    if (!canScan || scanning.value || (session && phase.value !== 'ready')) return
     const controller = new AbortController()
     scanController = controller
     scanning.value = true
-    profiles.clear()
+    if (!session) profiles.clear()
     let matches = 0
     try {
       await scanModels(env.navigator.bluetooth, (id, profile) => {
+        if (session && session.device.id !== id) return
         profiles.set(id, profile)
         matches++
         if (active?.device?.id === id) {
           if (profile.repair) clear(active, '该设备正在维修模式，无法控制。')
           else identity.value = profile
         }
-      }, controller.signal)
+      }, controller.signal, event => {
+        if (!debugBluetooth.value || (session && session.device.id !== event.device.id)) return
+        if (!event.manufacturerData?.size) logger.info('[BLE ADV] 广播中没有可读取的厂商数据')
+        for (const [company, value] of event.manufacturerData ?? []) {
+          const manufacturer = company.toString(16).padStart(4, '0').toUpperCase()
+          logPacket('ADV', manufacturer, new Uint8Array(value.buffer, value.byteOffset, value.byteLength))
+        }
+      })
       if (!controller.signal.aborted) message.value = matches ? '已读取设备广播。' : '暂未收到型号广播。'
     } catch (error) {
       if (!controller.signal.aborted) message.value = '无法读取广播：' + error.message
     } finally {
-      scanComplete.value = true
+      if (!controller.signal.aborted) scanComplete.value = true
       scanning.value = false
       scanController = null
     }
@@ -86,7 +95,9 @@ export function useDevice(env = globalThis) {
       phase.value = 'connecting'
       const server = await s.device.gatt.connect()
       const service = await server.getPrimaryService(SERVICE)
-      const profile = profiles.get(s.device.id) || await readModel(server)
+      const profile = profiles.get(s.device.id) || await readModel(server, text => {
+        if (debugBluetooth.value && active === s) logger.info(`[BLE MODEL] ${text}`)
+      })
       if (active !== s) return
       identity.value = profiles.get(s.device.id) || profile
       s.write = await service.getCharacteristic(WRITE)
