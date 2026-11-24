@@ -1,5 +1,5 @@
 import { computed, ref } from 'vue'
-import { statusRequest, timedMotor, SERVICE, NOTIFY, WRITE, motor, stopCommand, packets, notificationReader, readStatus } from './protocol.js'
+import { statusRequest, timedMotor, SERVICE, NOTIFY, WRITE, motor, stopCommand, breathingLightCommand, packets, notificationReader, readStatus } from './protocol.js'
 
 const discoveryOptions = () => ({
   filters: [{ namePrefix: 'SOSEXY' }],
@@ -15,6 +15,7 @@ export function useDevice(env = globalThis) {
   const reason = !env.isSecureContext ? '蓝牙连接需要 HTTPS 或 localhost。'
     : available ? '' : '当前浏览器未提供 Web Bluetooth，请用支持的 Chrome 或 Edge 打开。'
   const phase = ref('idle'), battery = ref(null), remaining = ref(null)
+  const breathingLight = ref(null)
   const message = ref(''), busy = ref(false), stopping = ref(false)
   const debugBluetooth = ref(false)
   const motorReadings = ref({})
@@ -43,7 +44,7 @@ export function useDevice(env = globalThis) {
     session.notify?.removeEventListener('characteristicvaluechanged', session.receive)
     session.device?.gatt?.disconnect()
     phase.value = 'idle'
-    battery.value = remaining.value = null
+    battery.value = remaining.value = breathingLight.value = null
     busy.value = stopping.value = false
     message.value = text
   }
@@ -83,6 +84,7 @@ export function useDevice(env = globalThis) {
         s.statusRetried = s.statusPaused = false
         if (message.value === noStatusMessage) message.value = '已收到设备状态。'
         if ('battery' in status) battery.value = status.battery
+        if ('breathingLight' in status) breathingLight.value = status.breathingLight
         for (const channel of ['vibration', 'suction', 'electric', 'electricMode']) {
           if (channel in status) motorReadings.value[channel] = status[channel]
         }
@@ -243,6 +245,26 @@ export function useDevice(env = globalThis) {
     }
   }
 
+  async function setBreathingLight(enabled) {
+    const s = active
+    if (phase.value !== 'ready' || busy.value || stopping.value || awaitingTimer.value) return false
+    if (typeof enabled !== 'boolean' || breathingLight.value === null || enabled === breathingLight.value) return false
+    busy.value = true
+    try {
+      await write(s, breathingLightCommand(enabled))
+      if (active === s && phase.value === 'ready' && !stopping.value) {
+        message.value = enabled ? '已发送开启呼吸灯指令。' : '已发送关闭呼吸灯指令。'
+        await requestStatus(s)
+      }
+      return active === s
+    } catch (error) {
+      if (active === s) message.value = '呼吸灯设置失败：' + error.message
+      return false
+    } finally {
+      if (active === s) busy.value = false
+    }
+  }
+
   async function stop() {
     const s = active
     if (!s?.write || !['ready','disconnecting'].includes(phase.value)) return false
@@ -277,5 +299,5 @@ export function useDevice(env = globalThis) {
     clear(s, remaining.value > 0 || awaitingTimer.value ? '已断开连接，设备定时可能仍在继续。' : '已断开连接。')
   }
 
-  return { motorReadings, intensityHistory, hasElectric, awaitingTimer, reportedTimerChannels, startTimer, refresh, pollStatus, available, reason, phase, battery, remaining, message, busy, stopping, debugBluetooth, connect, apply, stop, disconnect }
+  return { motorReadings, intensityHistory, hasElectric, breathingLight, setBreathingLight, awaitingTimer, reportedTimerChannels, startTimer, refresh, pollStatus, available, reason, phase, battery, remaining, message, busy, stopping, debugBluetooth, connect, apply, stop, disconnect }
 }

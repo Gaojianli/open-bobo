@@ -19,6 +19,7 @@ h1 { font-size: clamp(2rem, 5vw, 3rem); line-height: 1.18; margin: 10px 0 8px; o
 .telemetry { display: flex; gap: 52px; margin: 24px 0 0; border-top: 1px solid #ffffff33; padding: 14px 0 17px; }
 .telemetry dt { font-size: .875rem; color: #d7d4ed; }
 .telemetry dd { margin: 4px 0 0; font-weight: 650; }
+.telemetry .breathing-light-control { display: flex; align-items: center; gap: 8px; margin-top: 0; }
 .notice { margin-top: 12px; padding: 10px 14px; border-left: 3px solid #9b95c6; background: #eaeaf5; font-size: .94rem; }
 .section-heading { display: flex; align-items: center; justify-content: space-between; margin: 26px 0 15px; }
 h2 { font-size: 1.45rem; }

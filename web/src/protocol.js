@@ -15,6 +15,7 @@ export function motor(channel, level, mode) {
 
 export const statusRequest = () => Uint8Array.of(1, 0, 0xc8, 0x11, 1)
 export const stopCommand = () => Uint8Array.of(3, 0, 1, 0x11, 0, 0, 3, 0x11, 0, 0, 7, 0x11, 0)
+export const breathingLightCommand = enabled => Uint8Array.of(1, 0, 0x0d, 0x11, enabled ? 1 : 0)
 
 // The duration is in minutes and each selected channel sets one bit.
 const timedMotorFlags = new Map([['vibration', 1], ['suction', 2], ['electric', 4]])
@@ -89,6 +90,7 @@ export function readStatus(message) {
     if (id === 11 && message[i - 1] === 0x11 && message[i] <= 7) {
       status.timerChannels = [...timedMotorFlags.keys()].filter(channel => message[i] & timedMotorFlags.get(channel))
     }
+    if (id === 0x0d && message[i - 1] === 0x11 && message[i] <= 1) status.breathingLight = message[i] === 1
     i += length
   }
   return status

@@ -5,7 +5,7 @@ import ChannelControl from './ChannelControl.vue'
 import IntensityChart from './IntensityChart.vue'
 import { useDevice } from './useDevice.js'
 
-const { motorReadings, intensityHistory, hasElectric, awaitingTimer, reportedTimerChannels, startTimer, refresh, pollStatus,
+const { motorReadings, intensityHistory, hasElectric, breathingLight, setBreathingLight, awaitingTimer, reportedTimerChannels, startTimer, refresh, pollStatus,
   available, reason, phase, battery, remaining, busy, stopping,
   message, debugBluetooth, connect, disconnect, apply, stop } = useDevice()
 const ready = computed(() => phase.value === 'ready')
@@ -71,6 +71,15 @@ const reportedChannelsLabel = computed(() => timerChannels
         </div>
         <dl class="telemetry">
           <div><dt>设备电量</dt><dd>{{ battery === null ? '待上报' : battery + '%' }}</dd></div>
+          <div>
+            <dt>呼吸灯</dt>
+            <dd class="breathing-light-control">
+              <v-switch :model-value="breathingLight === true" aria-label="呼吸灯" color="white" density="compact"
+                :disabled="!ready || busy || stopping || awaitingTimer || breathingLight === null"
+                hide-details @update:model-value="setBreathingLight" />
+              <span>{{ breathingLight === null ? '待上报' : breathingLight ? '开' : '关' }}</span>
+            </dd>
+          </div>
         </dl>
       </section>
       <p v-if="reason || message" class="notice" role="status">{{ reason || message }}</p>
