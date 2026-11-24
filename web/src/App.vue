@@ -1,12 +1,12 @@
 <script setup>
 import { computed, ref, watch } from 'vue'
-import { VApp, VBtn, VCard, VDialog, VMain, VSelect } from 'vuetify/components'
+import { VApp, VBtn, VCard, VDialog, VMain, VSelect, VSwitch } from 'vuetify/components'
 import ChannelControl from './ChannelControl.vue'
 import { useDevice } from './useDevice.js'
 
 const { identity, motorReadings, canScan, scanning, scanComplete, identify, awaitingTimer, startTimer, refresh,
   available, reason, phase, name, battery, remaining, busy, stopping,
-  message, connect, disconnect, apply, stop } = useDevice()
+  message, debugBluetooth, connect, disconnect, apply, stop } = useDevice()
 const ready = computed(() => phase.value === 'ready')
 const phaseNames = { idle: '未连接', choosing: '请选择设备', connecting: '连接中', ready: '已连接', disconnecting: '断开中' }
 const locked = computed(() => remaining.value !== null && remaining.value > 0)
@@ -32,7 +32,10 @@ const time = computed(() => {
 <template>
   <v-app><v-main>
     <div class="shell">
-      <header><span class="brand-icon" aria-hidden="true"><i></i><i></i><i></i><i></i></span><strong>Open BOBO</strong></header>
+      <header>
+        <span class="brand-icon" aria-hidden="true"><i></i><i></i><i></i><i></i></span><strong>Open BOBO</strong>
+        <v-switch v-model="debugBluetooth" class="ml-auto flex-grow-0" label="蓝牙调试" color="primary" density="compact" hide-details />
+      </header>
       <section class="device-panel" aria-label="蓝牙设备">
         <div class="rings" aria-hidden="true"></div>
         <div class="device-info">

@@ -8,6 +8,7 @@ export function useDevice(env = globalThis) {
     : available ? '' : '当前浏览器未提供 Web Bluetooth，请用支持的 Chrome 或 Edge 打开。'
   const phase = ref('idle'), name = ref(''), battery = ref(null), remaining = ref(null)
   const message = ref(''), busy = ref(false), stopping = ref(false)
+  const debugBluetooth = ref(false)
   const identity = ref(null)
   const motorReadings = ref({})
   const awaitingTimer = ref(false)
@@ -17,6 +18,13 @@ export function useDevice(env = globalThis) {
   const profiles = new Map()
   let active = null
   let scanController = null
+
+  function logPacket(direction, characteristic, bytes) {
+    if (!debugBluetooth.value) return
+    const hex = Array.from(bytes, byte => byte.toString(16).padStart(2, '0')).join(' ').toUpperCase()
+    const logger = env.console ?? console
+    logger.info(`[BLE ${direction} ${characteristic}] ${hex}`)
+  }
 
   async function identify() {
     if (!canScan || scanning.value) return
@@ -88,7 +96,9 @@ export function useDevice(env = globalThis) {
       s.receive = event => {
         if (active !== s) return
         const v = event.target.value
-        const msg = read(new Uint8Array(v.buffer, v.byteOffset, v.byteLength))
+        const packet = new Uint8Array(v.buffer, v.byteOffset, v.byteLength)
+        logPacket('RX', 'EE02', packet)
+        const msg = read(packet)
         if (!msg) return
         const status = readStatus(msg)
         if ('battery' in status) battery.value = status.battery
@@ -118,6 +128,7 @@ export function useDevice(env = globalThis) {
     const run = async () => {
       for (const packet of packets(command)) {
         if (s !== active || !s.device.gatt.connected) throw Error('蓝牙已断开')
+        logPacket('TX', 'EE03', packet)
         if (s.write.properties.write) await s.write.writeValueWithResponse(packet)
         else await s.write.writeValueWithoutResponse(packet)
       }
@@ -216,5 +227,5 @@ export function useDevice(env = globalThis) {
     clear(s, remaining.value > 0 || awaitingTimer.value ? '已断开连接，设备定时可能仍在继续。' : '已断开连接。')
   }
 
-  return { scanComplete, identity, motorReadings, canScan, scanning, identify, awaitingTimer, startTimer, refresh, available, reason, phase, name, battery, remaining, message, busy, stopping, connect, apply, stop, disconnect }
+  return { scanComplete, identity, motorReadings, canScan, scanning, identify, awaitingTimer, startTimer, refresh, available, reason, phase, name, battery, remaining, message, busy, stopping, debugBluetooth, connect, apply, stop, disconnect }
 }

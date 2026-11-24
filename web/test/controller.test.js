@@ -27,7 +27,7 @@ test('复合状态通知、缺片、截断和未知字段', () => {
   assert.equal(read(Uint8Array.of(42, 3)), undefined)
 })
 
-function fixture({ withoutResponse = false } = {}) {
+function fixture({ withoutResponse = false, logger } = {}) {
   const writes = []
   const notify = new EventTarget()
   notify.startNotifications = async () => notify
@@ -48,7 +48,7 @@ function fixture({ withoutResponse = false } = {}) {
     async getPrimaryService(id) { assert.equal(id, SERVICE); return service },
     disconnect() { this.connected = false; device.dispatchEvent(new Event('gattserverdisconnected')) }
   }
-  const model = useDevice({ isSecureContext: true, navigator: { bluetooth: {
+  const model = useDevice({ console: logger, isSecureContext: true, navigator: { bluetooth: {
     async requestDevice(options) { assert.deepEqual(options.filters, [{ namePrefix: 'SOSEXY' }]); assert.ok(options.optionalServices.includes(SERVICE)); assert.equal(options.acceptAllDevices, undefined); return device }
   } } })
   function report(hex) {
@@ -58,6 +58,31 @@ function fixture({ withoutResponse = false } = {}) {
   }
   return { model, writes, report, device, write, notify }
 }
+test('蓝牙调试可在连接中切换，记录解析前的通知和实际写入的分片', async () => {
+  const logs = []
+  const { model, writes, report } = fixture({ logger: { info: message => logs.push(message) } })
+  await model.connect()
+  report('2a0100010005114b')
+  assert.deepEqual(logs, [])
+
+  model.debugBluetooth.value = true
+  await model.refresh()
+  report('000102030405060708090a0b0c0d0e')
+  report('2a01000100031100')
+  const sent = Buffer.from(writes.at(-1)).toString('hex').match(/../g).join(' ').toUpperCase()
+  assert.deepEqual(logs, [
+    `[BLE TX EE03] ${sent}`,
+    '[BLE RX EE02] 00 01 02 03 04 05 06 07 08 09 0A 0B 0C 0D 0E',
+    '[BLE RX EE02] 2A 01 00 01 00 03 11 00'
+  ])
+  assert.equal(model.motorReadings.value.electric, 0)
+
+  model.debugBluetooth.value = false
+  await model.refresh()
+  report('2a01000100051164')
+  assert.equal(logs.length, 3)
+  assert.equal(model.battery.value, 100)
+})
 for (const withoutResponse of [false, true]) {
   test('订阅、控制和停止，两种 GATT 写入属性 ' + withoutResponse, async () => {
     const { model, writes, report } = fixture({ withoutResponse })
