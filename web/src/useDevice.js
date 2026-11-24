@@ -16,6 +16,7 @@ export function useDevice(env = globalThis) {
     motorReadings.value.electric !== undefined || motorReadings.value.electricMode !== undefined
   )
   const awaitingTimer = ref(false)
+  const reportedTimerChannels = ref(null)
   const scanning = ref(false)
   const canScan = available && typeof env.navigator.bluetooth.requestLEScan === 'function'
   const scanComplete = ref(false)
@@ -72,6 +73,7 @@ export function useDevice(env = globalThis) {
     scanComplete.value = false
     motorReadings.value = {}
     awaitingTimer.value = false
+    reportedTimerChannels.value = null
     session.device?.removeEventListener('gattserverdisconnected', session.dropped)
     session.notify?.removeEventListener('characteristicvaluechanged', session.receive)
     session.device?.gatt?.disconnect()
@@ -123,6 +125,7 @@ export function useDevice(env = globalThis) {
           remaining.value = status.remaining
           awaitingTimer.value = false
         }
+        if ('timerChannels' in status) reportedTimerChannels.value = status.timerChannels
       }
       if (active !== s) return
       s.notify.addEventListener('characteristicvaluechanged', s.receive)
@@ -188,10 +191,13 @@ export function useDevice(env = globalThis) {
   async function startTimer(minutes, channels) {
     const s = active
     if (phase.value !== 'ready' || busy.value || stopping.value || awaitingTimer.value || remaining.value > 0) return false
+    const selected = Array.isArray(channels) ? channels : [channels]
+    if (selected.includes('electric') && !hasElectric.value) return false
     busy.value = true
     let attempted = false
     try {
-      const command = timedMotor(minutes, channels)
+      const command = timedMotor(minutes, selected)
+      reportedTimerChannels.value = null
       awaitingTimer.value = true
       s.mayBeRunning = true
       attempted = true
@@ -243,5 +249,5 @@ export function useDevice(env = globalThis) {
     clear(s, remaining.value > 0 || awaitingTimer.value ? '已断开连接，设备定时可能仍在继续。' : '已断开连接。')
   }
 
-  return { scanComplete, identity, motorReadings, hasElectric, canScan, scanning, identify, awaitingTimer, startTimer, refresh, available, reason, phase, name, battery, remaining, message, busy, stopping, debugBluetooth, connect, apply, stop, disconnect }
+  return { scanComplete, identity, motorReadings, hasElectric, canScan, scanning, identify, awaitingTimer, reportedTimerChannels, startTimer, refresh, available, reason, phase, name, battery, remaining, message, busy, stopping, debugBluetooth, connect, apply, stop, disconnect }
 }

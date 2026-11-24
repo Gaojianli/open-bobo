@@ -4,7 +4,7 @@ import { VApp, VBtn, VCard, VCardActions, VCardText, VCardTitle, VCheckbox, VMai
 import ChannelControl from './ChannelControl.vue'
 import { useDevice } from './useDevice.js'
 
-const { identity, motorReadings, hasElectric, canScan, scanning, scanComplete, identify, awaitingTimer, startTimer, refresh,
+const { identity, motorReadings, hasElectric, canScan, scanning, scanComplete, identify, awaitingTimer, reportedTimerChannels, startTimer, refresh,
   available, reason, phase, name, battery, remaining, busy, stopping,
   message, debugBluetooth, connect, disconnect, apply, stop } = useDevice()
 const ready = computed(() => phase.value === 'ready')
@@ -12,19 +12,25 @@ const phaseNames = { idle: '未连接', choosing: '请选择设备', connecting:
 const locked = computed(() => remaining.value !== null && remaining.value > 0)
 const controlsDisabled = computed(() => !ready.value || busy.value || stopping.value || locked.value || awaitingTimer.value)
 const minutes = ref(1)
-const chosenMotors = ref(['vibration'])
+const chosenChannels = ref(['vibration'])
 const motors = [{ id: 'vibration', label: '振动' }, { id: 'suction', label: '吸吮' }]
+const timerChannels = [...motors, { id: 'electric', label: '电击' }]
 const resetKey = ref(0)
 watch(phase, state => { if (state === 'idle') resetKey.value++ })
+watch(hasElectric, supported => {
+  if (!supported) chosenChannels.value = chosenChannels.value.filter(channel => channel !== 'electric')
+})
 async function stopAll() {
   if (await stop()) resetKey.value++
 }
 const timerStatus = computed(() => {
   if (awaitingTimer.value) return '已请求开启，等待设备上报'
-  if (remaining.value === null) return '剩余时间待上报'
-  if (!remaining.value) return '未开启'
+  if (!remaining.value) return '设备会在所选通道间随机组合运行'
   return '上次上报剩余 ' + Math.floor(remaining.value / 60) + ' 分 ' + remaining.value % 60 + ' 秒'
 })
+const reportedChannelsLabel = computed(() => timerChannels
+  .filter(channel => reportedTimerChannels.value?.includes(channel.id))
+  .map(channel => channel.label).join('、') || '无')
 </script>
 
 <template>
@@ -65,24 +71,28 @@ const timerStatus = computed(() => {
           @apply="(level, mode) => apply(item.id, level, mode)" />
         <channel-control channel-label="微电流通道" electric
           :reported="motorReadings.electric" :reported-mode="motorReadings.electricMode" :reset-key="resetKey"
+          :unsupported="ready && !hasElectric"
           :disabled="controlsDisabled || !hasElectric"
           @apply="(level, mode) => apply('electric', level, mode)" />
         <v-card class="channel-control" variant="outlined">
           <v-card-title tag="h3">失控模式</v-card-title>
           <v-card-text class="channel-control__fields">
-            <p class="readback" role="status">{{ timerStatus }}</p>
-            <div class="timer-channels" role="group" aria-label="运行电机">
-              <v-checkbox v-for="item in motors" :key="item.id"
-                v-model="chosenMotors" :value="item.id" :label="item.label"
-                :disabled="controlsDisabled" color="primary" density="compact" hide-details />
+            <div class="readback" role="status">
+              <p>{{ timerStatus }}</p>
+              <p v-if="locked && reportedTimerChannels !== null">设备上报通道 · {{ reportedChannelsLabel }}</p>
+            </div>
+            <div class="timer-channels" role="group" aria-label="运行通道">
+              <v-checkbox v-for="item in timerChannels" :key="item.id"
+                v-model="chosenChannels" :value="item.id" :label="item.label"
+                :disabled="controlsDisabled || (item.id === 'electric' && !hasElectric)" color="primary" density="compact" hide-details />
             </div>
             <v-select v-model="minutes" :items="[1, 2, 3]" :disabled="controlsDisabled"
               label="时长（分钟）" variant="outlined" hide-details />
           </v-card-text>
           <v-card-actions class="channel-control__actions">
             <v-btn type="button" class="flex-grow-1" color="primary" variant="flat" min-height="44"
-              :disabled="controlsDisabled || !chosenMotors.length"
-              @click="startTimer(minutes, chosenMotors)">开始</v-btn>
+              :disabled="controlsDisabled || !chosenChannels.length"
+              @click="startTimer(minutes, chosenChannels)">开始</v-btn>
           </v-card-actions>
         </v-card>
       </section>

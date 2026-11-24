@@ -6,7 +6,7 @@ export const WRITE = uuid('ee03')
 const channelKeys = new Map([['vibration', 1], ['electric', 3], ['suction', 7]])
 export function motor(channel, level, mode) {
   const key = channelKeys.get(channel)
-  if (!key || ![0, 25, 50, 75, 100].includes(level) || ![1, 2, 3, 4].includes(mode)) {
+  if (!key || !Number.isInteger(level) || level < 0 || level > 100 || ![1, 2, 3, 4].includes(mode)) {
     throw new RangeError('通道、强度或模式无效')
   }
   if (channel === 'electric' && level === 0) return Uint8Array.of(1, 0, key, 0x11, 0)
@@ -16,16 +16,16 @@ export function motor(channel, level, mode) {
 export const statusRequest = () => Uint8Array.of(1, 0, 0xc8, 0x11, 1)
 export const stopCommand = () => Uint8Array.of(3, 0, 1, 0x11, 0, 0, 3, 0x11, 0, 0, 7, 0x11, 0)
 
-// The duration is in minutes. The Web UI exposes the two mechanical channels.
-const timedMotorFlags = new Map([['vibration', 1], ['suction', 2]])
+// The duration is in minutes and each selected channel sets one bit.
+const timedMotorFlags = new Map([['vibration', 1], ['suction', 2], ['electric', 4]])
 export function timedMotor(minutes, channels) {
   let mask = 0
   for (const channel of Array.isArray(channels) ? channels : [channels]) {
     const flag = timedMotorFlags.get(channel)
-    if (!flag) throw new RangeError('请选择振动或吸吮')
+    if (!flag) throw new RangeError('请选择有效的输出通道')
     mask |= flag
   }
-  if (!mask || ![1, 2, 3].includes(minutes)) throw new RangeError('请选择电机和定时时长')
+  if (!mask || ![1, 2, 3].includes(minutes)) throw new RangeError('请选择输出通道和定时时长')
   return Uint8Array.of(2, 0, 9, 0x11, minutes, 0, 11, 0x11, mask)
 }
 
@@ -86,6 +86,9 @@ export function readStatus(message) {
     if (id === 4 && message[i - 1] === 0x11) status.electricMode = message[i]
     if (id === 5 && message[i] <= 100) status.battery = message[i]
     if (id === 10) status.remaining = (message[i] << 8) | message[i + 1]
+    if (id === 11 && message[i - 1] === 0x11 && message[i] <= 7) {
+      status.timerChannels = [...timedMotorFlags.keys()].filter(channel => message[i] & timedMotorFlags.get(channel))
+    }
     i += length
   }
   return status

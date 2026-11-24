@@ -16,7 +16,9 @@ test('官方发送路径的固定字节和分片边界', () => {
     const read = notificationReader()
     assert.deepEqual(frames.map(read).filter(Boolean), [body])
   }
-  assert.throws(() => motor('vibration', 1, 1))
+  assert.deepEqual(motor('vibration', 37, 1), fromHex('020001112500021101'))
+  assert.throws(() => motor('vibration', 1.5, 1))
+  assert.throws(() => motor('vibration', 101, 1))
 })
 test('复合状态通知、缺片、截断和未知字段', () => {
   assert.deepEqual(readStatus(fromHex('020005114b000a12012c')), { battery: 75, remaining: 300 })
@@ -157,7 +159,7 @@ test('选择器排除维修设备，广播 PID 区分普通版、Pro 和未知�
   const data = pid => new DataView(Uint8Array.of(0xab, 0, pid).buffer)
   for (const pid of [2, 3, 5, 7, 40]) {
     const result = fromAdvertisement(new Map([[0x1234, data(pid)]]))
-    assert.equal(result.model, pid === 40 ? '啵啵贝 · 版本待确认' : pid < 5 ? '啵啵贝' : '啵啵贝 Pro')
+    assert.equal(result.model, pid === 40 ? '啵啵贝 · 版本待确认' : pid < 5 ? 'FUNF 啵啵贝' : 'FUNF 啵啵贝 Pro')
   }
   assert.equal(fromAdvertisement(new Map([[0x05d6, data(5)]])), null)
   assert.equal(fromAdvertisement(new Map([[0x1234, new DataView(new ArrayBuffer(2))]])), null)
@@ -214,7 +216,7 @@ test('连接后重试型号识别时只使用已连接设备的厂商广播', as
   advertise({ id: 'another-bobo', name: device.name }, 3)
   assert.equal(model.identity.value.source, null)
   advertise(device, 5)
-  assert.equal(model.identity.value.model, '啵啵贝 Pro')
+  assert.equal(model.identity.value.model, 'FUNF 啵啵贝 Pro')
   assert.equal(model.identity.value.pid, '0005')
   assert.deepEqual(logs.filter(message => message.startsWith('[BLE ADV')), ['[BLE ADV 1234] 00 00 05'])
   await model.disconnect()
@@ -232,6 +234,7 @@ test('四片设备状态通知保留微电流强度和模式的零值', async ()
   report('01 04 00 00 00 00 00 00 00 00 0D 11 01 00 0E 11 01')
   assert.deepEqual(model.motorReadings.value, { vibration: 0, suction: 0, electric: 0, electricMode: 0 })
   assert.equal(model.battery.value, 90)
+  assert.deepEqual(model.reportedTimerChannels.value, [])
   assert.equal(model.identity.value.source, null)
 })
 test('单独停止一个电机，能力由设备通知确认并在断开后清理', async () => {
@@ -267,7 +270,7 @@ test('微电流上报后可以启动和单独停止，重连后需要重新确�
 test('机械通道定时指令、重复点击、设备回报和停止语义', async () => {
   assert.deepEqual(timedMotor(1, 'vibration'), fromHex('0200091101000b1101'))
   assert.deepEqual(timedMotor(2, 'suction'), fromHex('0200091102000b1102'))
-  assert.throws(() => timedMotor(2, ['vibration', 'electric']))
+  assert.throws(() => timedMotor(2, ['vibration', 'unknown']))
   assert.throws(() => timedMotor(2, []))
   const { model, writes, report } = fixture()
   await model.connect()
@@ -282,4 +285,31 @@ test('机械通道定时指令、重复点击、设备回报和停止语义', as
   assert.equal(model.remaining.value, 60)
   report('2a010001000a120000')
   assert.equal(await model.apply('vibration', 25, 1), true)
+})
+test('失控模式的三种通道独立组合，掩码与原 App 一致', () => {
+  const cases = [
+    ['vibration'], ['suction'], ['vibration', 'suction'], ['electric'],
+    ['vibration', 'electric'], ['suction', 'electric'], ['vibration', 'suction', 'electric']
+  ]
+  for (const [index, channels] of cases.entries()) {
+    const mask = index + 1
+    assert.deepEqual(timedMotor(2, channels), Uint8Array.of(2, 0, 9, 0x11, 2, 0, 11, 0x11, mask))
+    assert.deepEqual(readStatus(Uint8Array.of(1, 0, 11, 0x11, mask)).timerChannels, channels)
+  }
+})
+test('定时的电击选项需要当前连接上报微电流能力，界面使用设备回报的通道', async () => {
+  const { model, writes, report } = fixture()
+  await model.connect()
+  const selected = ['vibration', 'suction', 'electric']
+  assert.equal(await model.startTimer(2, selected), false)
+  assert.equal(writes.length, 1)
+  report('2a 01 00 02 00 03 11 00 00 0B 11 00')
+  assert.equal(await model.startTimer(2, selected), true)
+  assert.deepEqual(writes.at(-1).slice(3), fromHex('0200091102000b1107'))
+  assert.equal(model.reportedTimerChannels.value, null)
+  report('2a 01 00 02 00 0A 12 00 77 00 0B 11 07')
+  assert.equal(model.remaining.value, 119)
+  assert.deepEqual(model.reportedTimerChannels.value, selected)
+  await model.disconnect()
+  assert.equal(model.reportedTimerChannels.value, null)
 })

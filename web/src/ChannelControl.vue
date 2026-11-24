@@ -15,6 +15,7 @@ const props = defineProps({
   reported: Number,
   reportedMode: Number,
   electric: Boolean,
+  unsupported: Boolean,
   disabled: { type: Boolean, default: false },
   resetKey: { type: Number, default: 0 },
 })
@@ -23,11 +24,8 @@ const emit = defineEmits(['apply'])
 
 const level = ref(0)
 const mode = ref(1)
-const levelTicks = { 0: '0', 25: '25', 50: '50', 75: '75', 100: '100' }
-const modes = [1, 2, 3, 4].map((value) => ({
-  title: `模式 ${value}`,
-  value,
-}))
+const modes = ['温柔前戏', '调情升温', '波澜不断', '狂野高潮']
+  .map((title, index) => ({ title, value: index + 1 }))
 
 watch(() => props.resetKey, () => {
   level.value = 0
@@ -47,19 +45,18 @@ function apply() {
     </v-card-title>
 
     <v-card-text class="channel-control__fields">
-      <div class="readback">
+      <p v-if="props.unsupported" class="readback" role="status">设备不支持</p>
+      <div v-else class="readback">
         设备上报强度 · {{ props.reported ?? '待上报' }}
-        <span v-if="props.electric"> · 模式 {{ props.reportedMode ?? '待上报' }}</span>
+        <span v-if="props.electric"> · 模式 {{ modes[props.reportedMode - 1]?.title ?? props.reportedMode ?? '待上报' }}</span>
       </div>
       <v-slider
         v-model="level"
         :label="`等级：${level}`"
         :min="0"
         :max="100"
-        :step="25"
-        :ticks="levelTicks"
+        :step="1"
         :disabled="props.disabled"
-        show-ticks="always"
         thumb-label
         hide-details
         color="primary"

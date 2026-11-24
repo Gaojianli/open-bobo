@@ -9,7 +9,7 @@ export const discoveryOptions = () => ({
 })
 
 const editions = new Map([
-  [2, '啵啵贝'], [3, '啵啵贝'], [5, '啵啵贝 Pro'], [7, '啵啵贝 Pro']
+  [2, 'FUNF 啵啵贝'], [3, 'FUNF 啵啵贝'], [5, 'FUNF 啵啵贝 Pro'], [7, 'FUNF 啵啵贝 Pro']
 ])
 
 export function fromPid(value, source) {
