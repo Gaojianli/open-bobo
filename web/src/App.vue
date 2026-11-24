@@ -5,8 +5,8 @@ import ChannelControl from './ChannelControl.vue'
 import IntensityChart from './IntensityChart.vue'
 import { useDevice } from './useDevice.js'
 
-const { identity, modelUnconfirmed, motorReadings, intensityHistory, hasElectric, canScan, scanning, scanComplete, identify, awaitingTimer, reportedTimerChannels, startTimer, refresh,
-  available, reason, phase, name, battery, remaining, busy, stopping,
+const { motorReadings, intensityHistory, hasElectric, awaitingTimer, reportedTimerChannels, startTimer, refresh,
+  available, reason, phase, battery, remaining, busy, stopping,
   message, debugBluetooth, connect, disconnect, apply, stop } = useDevice()
 const ready = computed(() => phase.value === 'ready')
 const chartClock = ref(Date.now())
@@ -60,19 +60,14 @@ const reportedChannelsLabel = computed(() => timerChannels
         <div class="rings" aria-hidden="true"></div>
         <div class="device-info">
           <span class="connection" role="status"><i :class="{ online: ready }"></i>{{ phaseNames[phase] }}</span>
-          <h1>{{ identity?.model || name || '蓝牙控制器' }}</h1>
+          <h1>啵啵贝控制台</h1>
           <p>{{ ready ? '通过本机蓝牙控制已连接的设备。' : '连接附近的啵啵贝，调节振动与吸吮。' }}</p>
-          <v-btn v-if="phase === 'idle' && canScan && !scanComplete" class="link-device" size="large"
-            :loading="scanning" @click="identify">识别附近的啵啵贝</v-btn>
-          <v-btn v-else-if="!ready && phase !== 'disconnecting'" class="link-device" size="large"
+          <v-btn v-if="!ready && phase !== 'disconnecting'" class="link-device" size="large"
             :disabled="!available || phase !== 'idle'" :loading="phase === 'connecting'" @click="connect">连接设备</v-btn>
           <v-btn v-else class="link-device" size="large" :loading="phase === 'disconnecting'" @click="disconnect">断开连接</v-btn>
           <v-btn v-if="ready" class="ml-2" variant="text" :disabled="busy || stopping" @click="refresh">刷新状态</v-btn>
-          <v-btn v-if="ready && canScan && modelUnconfirmed" variant="text"
-            :loading="scanning" @click="identify">重新识别型号</v-btn>
         </div>
         <dl class="telemetry">
-          <div v-if="ready"><dt>型号识别</dt><dd>{{ identity?.source ?? (canScan ? '版本待确认' : '浏览器未提供广播扫描') }}<span v-if="identity?.pid"> · PID {{ identity.pid }}</span></dd></div>
           <div><dt>设备电量</dt><dd>{{ battery === null ? '待上报' : battery + '%' }}</dd></div>
         </dl>
       </section>

@@ -1,8 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { packets, motor, stopCommand, notificationReader, readStatus, SERVICE, WRITE, NOTIFY } from '../src/protocol.js'
-import { fromAdvertisement, readModel, discoveryOptions, scanModels } from '../src/identity.js'
-import { timedMotor } from '../src/protocol.js'
+import { statusRequest, timedMotor } from '../src/protocol.js'
 import { useDevice } from '../src/useDevice.js'
 
 const fromHex = s => Uint8Array.from(Buffer.from(s.replaceAll(' ', ''), 'hex'))
@@ -29,7 +28,7 @@ test('复合状态通知、缺片、截断和未知字段', () => {
   assert.equal(read(Uint8Array.of(42, 3)), undefined)
 })
 
-function fixture({ withoutResponse = false, logger, bluetooth = new EventTarget() } = {}) {
+function fixture({ withoutResponse = false, logger } = {}) {
   const writes = []
   const notify = new EventTarget()
   notify.startNotifications = async () => notify
@@ -50,12 +49,13 @@ function fixture({ withoutResponse = false, logger, bluetooth = new EventTarget(
     async getPrimaryService(id) { assert.equal(id, SERVICE); return service },
     disconnect() { this.connected = false; device.dispatchEvent(new Event('gattserverdisconnected')) }
   }
-  bluetooth.requestDevice = async options => {
+  const bluetooth = { async requestDevice(options) {
     assert.deepEqual(options.filters, [{ namePrefix: 'SOSEXY' }])
-    assert.ok(options.optionalServices.includes(SERVICE))
+    assert.deepEqual(options.optionalServices, [SERVICE])
+    assert.deepEqual(options.exclusionFilters, [{ manufacturerData: [{ companyIdentifier: 0x05d6 }] }])
     assert.equal(options.acceptAllDevices, undefined)
     return device
-  }
+  } }
   const model = useDevice({ console: logger, isSecureContext: true, navigator: { bluetooth } })
   function report(hex) {
     const bytes = fromHex(hex)
@@ -103,7 +103,7 @@ for (const withoutResponse of [false, true]) {
     report('2a010001000a120000')
     assert.equal(await model.apply('suction', 50, 1), true)
     await model.disconnect()
-    assert.deepEqual(writes.map(p => p.slice(3)), [stopCommand(), fromHex('0100c81101'), motor('suction', 50, 1), stopCommand()])
+    assert.deepEqual(writes.map(p => p.slice(3)), [stopCommand(), statusRequest(), motor('suction', 50, 1), statusRequest(), stopCommand()])
     assert.equal(model.battery.value, null)
     assert.equal(model.phase.value, 'idle')
   })
@@ -123,7 +123,7 @@ test('停止等待正在写入的指令，同时阻止新的普通写入', async
   assert.equal(await model.apply('suction', 50, 1), false)
   release()
   await Promise.all([first, stopping])
-  assert.deepEqual(commands, [motor('vibration', 25, 1), stopCommand()])
+  assert.deepEqual(commands, [motor('vibration', 25, 1), stopCommand(), statusRequest()])
 })
 test('意外断连清空数据，旧监听器不影响下次连接', async () => {
   const { model, device, report } = fixture()
@@ -154,78 +154,6 @@ test('用户取消选择和缺少浏览器支持', async () => {
   assert.equal(useDevice({ isSecureContext: false }).available, false)
 })
 
-test('选择器排除维修设备，广播 PID 区分普通版、Pro 和未知产品', () => {
-  assert.deepEqual(discoveryOptions().exclusionFilters, [{ manufacturerData: [{ companyIdentifier: 0x05d6 }] }])
-  const data = pid => new DataView(Uint8Array.of(0xab, 0, pid).buffer)
-  for (const pid of [2, 3, 5, 7, 40]) {
-    const result = fromAdvertisement(new Map([[0x1234, data(pid)]]))
-    assert.equal(result.model, pid === 40 ? '啵啵贝 · 版本待确认' : pid < 5 ? 'FUNF 啵啵贝' : 'FUNF 啵啵贝 Pro')
-  }
-  assert.equal(fromAdvertisement(new Map([[0x05d6, data(5)]])), null)
-  assert.equal(fromAdvertisement(new Map([[0x1234, new DataView(new ArrayBuffer(2))]])), null)
-})
-test('可选扫描按设备 ID 区分同名设备并清理监听，忽略耳机', async () => {
-  const bluetooth = new EventTarget()
-  const controller = new AbortController()
-  let stopped = false
-  const found = new Map()
-  bluetooth.requestLEScan = async () => ({ stop() { stopped = true } })
-  const scan = scanModels(bluetooth, (id, model) => found.set(id, model), controller.signal)
-  function report(id, name, company, pid) {
-    bluetooth.dispatchEvent(Object.assign(new Event('advertisementreceived'), {
-      device: { id, name }, manufacturerData: new Map([[company, new DataView(Uint8Array.of(0, 0, pid).buffer)]])
-    }))
-  }
-  report('one', 'SOSEXY', 0x1234, 3)
-  report('two', 'SOSEXY', 0x1234, 5)
-  report('dfu', 'SOSEXY', 0x05d6, 5)
-  report('other', '耳机', 0x1234, 5)
-  controller.abort()
-  await scan
-  assert.equal(found.get('one').pid, '0003')
-  assert.equal(found.get('two').pid, '0005')
-  assert.equal(found.get('dfu').repair, true)
-  assert.equal(found.has('other'), false)
-  assert.equal(stopped, true)
-  report('late', 'SOSEXY', 0x1234, 5)
-  assert.equal(found.has('late'), false)
-})
-test('读取可选 GATT 型号，通用广播名保留版本未知', async () => {
-  const server = label => ({ async getPrimaryService() {
-    return { async getCharacteristic() { return { async readValue() { return new DataView(new TextEncoder().encode(label).buffer) } } } }
-  } })
-  assert.equal((await readModel(server('FUNF 啵啵贝 Pro'))).model, 'FUNF 啵啵贝 Pro')
-  assert.match((await readModel(server('SOSEXY'))).model, /待确认/)
-})
-test('连接后重试型号识别时只使用已连接设备的厂商广播', async () => {
-  const bluetooth = new EventTarget()
-  bluetooth.requestLEScan = async () => ({ stop() {} })
-  const logs = []
-  const { model, device } = fixture({ bluetooth, logger: { info: message => logs.push(message) } })
-  model.debugBluetooth.value = true
-  await model.connect()
-  assert.equal(model.identity.value.source, null)
-  assert.equal(model.modelUnconfirmed.value, true)
-  assert.ok(logs.some(message => message.startsWith('[BLE MODEL] 无法读取型号字段')))
-  const scan = model.identify()
-  function advertise(candidate, pid) {
-    bluetooth.dispatchEvent(Object.assign(new Event('advertisementreceived'), {
-      device: candidate,
-      manufacturerData: new Map([[0x1234, new DataView(Uint8Array.of(0, 0, pid).buffer)]])
-    }))
-  }
-  advertise({ id: 'another-bobo', name: device.name }, 3)
-  assert.equal(model.identity.value.source, null)
-  advertise(device, 5)
-  assert.equal(model.identity.value.model, 'FUNF 啵啵贝 Pro')
-  assert.equal(model.identity.value.pid, '0005')
-  assert.equal(model.modelUnconfirmed.value, false)
-  assert.deepEqual(logs.filter(message => message.startsWith('[BLE ADV')), ['[BLE ADV 1234] 00 00 05'])
-  await model.disconnect()
-  await scan
-  assert.equal(model.identity.value, null)
-  assert.equal(model.scanning.value, false)
-})
 test('强度历史保留实际通道上报和零值，断开时清空', async () => {
   const { model, report } = fixture()
   await model.connect()
@@ -240,6 +168,23 @@ test('强度历史保留实际通道上报和零值，断开时清空', async ()
   await model.disconnect()
   assert.deepEqual(model.intensityHistory.value, [])
 })
+test('应用设置和全部停止会重新请求状态，强度以设备通知为准', async () => {
+  const { model, writes, report } = fixture()
+  await model.connect()
+  report('2a01000100071100')
+  assert.equal(await model.apply('suction', 49, 1), true)
+  assert.deepEqual(writes.slice(-2).map(packet => packet.slice(3)), [motor('suction', 49, 1), statusRequest()])
+  assert.equal(model.motorReadings.value.suction, 0)
+  report('2a01000100071131')
+  assert.equal(model.motorReadings.value.suction, 49)
+  assert.equal(model.intensityHistory.value.at(-1).suction, 49)
+  assert.equal(await model.stop(), true)
+  assert.deepEqual(writes.slice(-2).map(packet => packet.slice(3)), [stopCommand(), statusRequest()])
+  assert.equal(model.motorReadings.value.suction, 49)
+  report('2a01000100071100')
+  assert.equal(model.motorReadings.value.suction, 0)
+  assert.deepEqual(model.intensityHistory.value.map(sample => sample.suction), [0, 49, 0])
+})
 test('四片设备状态通知保留微电流强度和模式的零值', async () => {
   const { model, report } = fixture()
   await model.connect()
@@ -251,7 +196,6 @@ test('四片设备状态通知保留微电流强度和模式的零值', async ()
   assert.deepEqual(model.motorReadings.value, { vibration: 0, suction: 0, electric: 0, electricMode: 0 })
   assert.equal(model.battery.value, 90)
   assert.deepEqual(model.reportedTimerChannels.value, [])
-  assert.equal(model.identity.value.source, null)
 })
 test('定时运行中重连只收到配置时，定时归零后自动请求一次普通状态', async () => {
   const { model, writes, report } = fixture()
@@ -278,7 +222,7 @@ test('单独停止一个电机，能力由设备通知确认并在断开后清�
   report('2a01000100041102')
   assert.equal(model.motorReadings.value.electricMode, 2)
   await model.apply('suction', 0, 1)
-  assert.deepEqual(writes.at(-1).slice(3), motor('suction', 0, 1))
+  assert.deepEqual(writes.slice(-2).map(packet => packet.slice(3)), [motor('suction', 0, 1), statusRequest()])
   await model.disconnect()
   assert.deepEqual(model.motorReadings.value, {})
 })
@@ -290,10 +234,10 @@ test('微电流上报后可以启动和单独停止，重连后需要重新确�
   report('2a0100020003110000041100')
   assert.equal(model.hasElectric.value, true)
   assert.equal(await model.apply('electric', 25, 1), true)
-  assert.deepEqual(writes.at(-1).slice(3), fromHex('020003111900041101'))
+  assert.deepEqual(writes.slice(-2).map(packet => packet.slice(3)), [fromHex('020003111900041101'), statusRequest()])
   assert.match(model.message.value, /微电流/)
   assert.equal(await model.apply('electric', 0, 1), true)
-  assert.deepEqual(writes.at(-1).slice(3), fromHex('0100031100'))
+  assert.deepEqual(writes.slice(-2).map(packet => packet.slice(3)), [fromHex('0100031100'), statusRequest()])
   await model.disconnect()
   assert.equal(model.hasElectric.value, false)
   await model.connect()
